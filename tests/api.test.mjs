@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { promisify } from "node:util";
@@ -73,6 +74,19 @@ test("health reports the seeded temp library", async () => {
   assert.equal(body.ok, true);
   assert.equal(body.seeded, true);
   assert.equal(body.library_root, libraryRoot);
+  assert.equal(body.db_path, path.join(libraryRoot, "metadata.sqlite"));
+});
+
+test("seed writes normalized SQLite metadata", async () => {
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count, 7);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM bookmarks").get().count, 9);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM clips").get().count, 2);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM session_clips").get().count, 2);
+  } finally {
+    db.close();
+  }
 });
 
 test("seeded fixture sessions load with bookmarks, waveforms, and existing clips", async () => {
@@ -125,6 +139,21 @@ test("saving a clip writes copied audio, clip metadata, and archival source stat
   assert.equal(clipAudio.toString("ascii", 8, 12), "WAVE");
   assert.equal(clipJson.id, body.clip.id);
   assert.equal(sessionJson.clips.includes(body.clip.id), true);
+
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    assert.equal(db.prepare("SELECT title FROM clips WHERE id = ?").get(body.clip.id).title, "Test clip");
+    assert.equal(
+      db.prepare("SELECT state FROM sessions WHERE id = ?").get("session-2026-05-02-003").state,
+      "archival_context"
+    );
+    assert.equal(
+      db.prepare("SELECT state FROM bookmarks WHERE session_id = ? AND id = ?").get("session-2026-05-02-003", "bookmark-001").state,
+      "captured"
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test("invalid clip ranges are rejected without changing source metadata", async () => {
@@ -171,4 +200,18 @@ test("delete-safe removes only safe throwaway sessions", async () => {
     /ENOENT/
   );
   await fs.access(path.join(libraryRoot, "sessions", "session-2026-05-02-003", "session.json"));
+
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE id = ?").get("session-2026-04-11-002").count,
+      0
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE id = ?").get("session-2026-05-02-003").count,
+      1
+    );
+  } finally {
+    db.close();
+  }
 });

@@ -2,6 +2,7 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createMetadataStore } from "./metadata-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -13,6 +14,14 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use("/media/sessions", express.static(path.join(libraryRoot, "sessions")));
 app.use("/media/clips", express.static(path.join(libraryRoot, "clips")));
+
+const store = createMetadataStore(libraryRoot);
+let metadataReadyPromise = null;
+
+async function ensureMetadataReady() {
+  metadataReadyPromise ||= store.importSidecarLibrary();
+  await metadataReadyPromise;
+}
 
 async function pathExists(filePath) {
   try {
@@ -33,15 +42,6 @@ async function writeJson(filePath, data) {
   await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
-async function sessionDirs() {
-  const root = path.join(libraryRoot, "sessions");
-  if (!(await pathExists(root))) {
-    return [];
-  }
-  const entries = await fs.readdir(root, { withFileTypes: true });
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-}
-
 async function loadWaveform(sessionId) {
   const filePath = path.join(libraryRoot, "cache", "waveforms", `${sessionId}.json`);
   if (!(await pathExists(filePath))) {
@@ -51,21 +51,25 @@ async function loadWaveform(sessionId) {
 }
 
 async function loadClip(clipId) {
-  const filePath = path.join(libraryRoot, "clips", `${clipId}.json`);
-  if (!(await pathExists(filePath))) {
+  await ensureMetadataReady();
+  const clip = store.loadClipMetadata(clipId);
+  if (!clip) {
     return null;
   }
-  const clip = await readJson(filePath);
-  return {
-    ...clip,
-    audio_url: `/media/clips/${clip.audio_path}`
-  };
+  return enrichClip(clip);
 }
 
 async function loadSession(sessionId) {
-  const sessionPath = path.join(libraryRoot, "sessions", sessionId, "session.json");
-  const session = await readJson(sessionPath);
-  const sourcePath = path.join(libraryRoot, "sessions", sessionId, session.audio_path);
+  await ensureMetadataReady();
+  const session = store.loadSessionMetadata(sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+  return enrichSession(session);
+}
+
+async function enrichSession(session) {
+  const sourcePath = path.join(libraryRoot, "sessions", session.id, session.audio_path);
   const stat = await fs.stat(sourcePath);
   const clipDetails = [];
 
@@ -78,57 +82,38 @@ async function loadSession(sessionId) {
 
   return {
     ...session,
-    audio_url: `/media/sessions/${sessionId}/${session.audio_path}`,
+    audio_url: `/media/sessions/${session.id}/${session.audio_path}`,
     source_size_bytes: session.storage_size_bytes || stat.size,
     actual_source_size_bytes: stat.size,
-    waveform: await loadWaveform(sessionId),
+    waveform: await loadWaveform(session.id),
     clip_details: clipDetails
   };
 }
 
 async function loadSessions() {
-  const ids = await sessionDirs();
-  const sessions = await Promise.all(ids.map((id) => loadSession(id)));
+  await ensureMetadataReady();
+  const sessions = await Promise.all(store.loadSessionsMetadata().map((session) => enrichSession(session)));
   return sessions.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
 
 async function loadClips() {
-  const clipsRoot = path.join(libraryRoot, "clips");
-  if (!(await pathExists(clipsRoot))) {
-    return [];
-  }
-  const entries = await fs.readdir(clipsRoot);
-  const jsonFiles = entries.filter((entry) => entry.endsWith(".json")).sort();
-  const clips = await Promise.all(jsonFiles.map((entry) => readJson(path.join(clipsRoot, entry))));
-  return clips.map((clip) => ({
-    ...clip,
-    audio_url: `/media/clips/${clip.audio_path}`
-  }));
+  await ensureMetadataReady();
+  return store.loadClipsMetadata().map((clip) => enrichClip(clip));
 }
 
 async function saveSession(session) {
-  await writeJson(path.join(libraryRoot, "sessions", session.id, "session.json"), stripRuntimeSessionFields(session));
+  await store.saveSessionMetadata(session);
 }
 
-function stripRuntimeSessionFields(session) {
-  const {
-    audio_url,
-    source_size_bytes,
-    actual_source_size_bytes,
-    waveform,
-    clip_details,
-    ...persisted
-  } = session;
-  return persisted;
-}
-
-function stripRuntimeClipFields(clip) {
-  const { audio_url, ...persisted } = clip;
-  return persisted;
+function enrichClip(clip) {
+  return {
+    ...clip,
+    audio_url: `/media/clips/${clip.audio_path}`
+  };
 }
 
 async function saveClip(clip) {
-  await writeJson(path.join(libraryRoot, "clips", `${clip.id}.json`), stripRuntimeClipFields(clip));
+  await store.saveClipMetadata(clip);
 }
 
 async function loadStorageSim() {
@@ -311,12 +296,18 @@ async function trimWavFile(sourcePath, targetPath, startSeconds, endSeconds) {
   await fs.writeFile(targetPath, Buffer.concat([header, clipData]));
 }
 
-app.get("/api/health", async (_req, res) => {
-  res.json({
-    ok: true,
-    library_root: libraryRoot,
-    seeded: await pathExists(path.join(libraryRoot, "sessions"))
-  });
+app.get("/api/health", async (_req, res, next) => {
+  try {
+    await ensureMetadataReady();
+    res.json({
+      ok: true,
+      library_root: libraryRoot,
+      db_path: store.dbPath,
+      seeded: store.hasSessions()
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/sessions", async (_req, res, next) => {
@@ -475,6 +466,7 @@ app.post("/api/storage/delete-safe", async (_req, res, next) => {
     for (const id of safeIds) {
       await fs.rm(path.join(libraryRoot, "sessions", id), { recursive: true, force: true });
       await fs.rm(path.join(libraryRoot, "cache", "waveforms", `${id}.json`), { force: true });
+      store.deleteSessionMetadata(id);
     }
 
     res.json({

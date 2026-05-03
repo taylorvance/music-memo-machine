@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createMetadataStore } from "../server/metadata-store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -345,7 +346,15 @@ async function main() {
     }
   });
 
+  const store = createMetadataStore(libraryRoot);
+  try {
+    await store.importSidecarLibrary({ replace: true });
+  } finally {
+    store.close();
+  }
+
   console.log(`Seeded ${sessions.length} sessions and ${clipFixtures.length} clips in ${libraryRoot}`);
+  console.log(`Metadata: ${path.join(libraryRoot, "metadata.sqlite")}`);
 }
 
 main().catch((error) => {
