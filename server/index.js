@@ -543,7 +543,11 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: error.message || "Server error" });
 });
 
-app.listen(port, host, () => {
-  console.log(`Music Memo Machine API listening on http://${host}:${port}`);
-  console.log(`Library: ${libraryRoot}`);
-});
+if (process.env.NODE_ENV !== "test") {
+  app.listen(port, host, () => {
+    console.log(`Music Memo Machine API listening on http://${host}:${port}`);
+    console.log(`Library: ${libraryRoot}`);
+  });
+}
+
+export { app, libraryRoot };

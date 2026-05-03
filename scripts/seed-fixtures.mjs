@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const libraryRoot = path.join(projectRoot, "library");
+const libraryRoot = path.resolve(process.env.LIBRARY_DIR || path.join(projectRoot, "library"));
 const sampleRate = 16_000;
 const channels = 1;
 const bytesPerSample = 2;
