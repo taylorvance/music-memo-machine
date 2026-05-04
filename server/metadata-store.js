@@ -17,6 +17,7 @@ INSERT OR IGNORE INTO schema_meta (key, value) VALUES ('schema_version', '1');
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
   duration_seconds REAL NOT NULL,
   audio_path TEXT NOT NULL,
   state TEXT NOT NULL,
@@ -191,6 +192,11 @@ export function createMetadataStore(libraryRoot) {
   }
 
   function migrateSchema() {
+    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all();
+    if (!sessionColumns.some((row) => row.name === "title")) {
+      db.exec("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+    }
+
     const clipForeignKeys = db.prepare("PRAGMA foreign_key_list(clips)").all();
     if (clipForeignKeys.some((row) => row.table === "sessions")) {
       db.exec("PRAGMA foreign_keys = OFF");
@@ -243,7 +249,7 @@ export function createMetadataStore(libraryRoot) {
     }
 
     db.exec("CREATE INDEX IF NOT EXISTS idx_clips_source_session ON clips(source_session_id)");
-    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("2", "schema_version");
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("3", "schema_version");
   }
 
   function hydrateSession(row) {
@@ -264,6 +270,7 @@ export function createMetadataStore(libraryRoot) {
       `INSERT INTO sessions (
         id,
         created_at,
+        title,
         duration_seconds,
         audio_path,
         state,
@@ -275,9 +282,10 @@ export function createMetadataStore(libraryRoot) {
         sample_rate,
         channel_count,
         storage_size_bytes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         created_at = excluded.created_at,
+        title = excluded.title,
         duration_seconds = excluded.duration_seconds,
         audio_path = excluded.audio_path,
         state = excluded.state,
@@ -292,6 +300,7 @@ export function createMetadataStore(libraryRoot) {
     ).run(
       session.id,
       session.created_at,
+      session.title || "",
       session.duration_seconds,
       session.audio_path,
       session.state,
@@ -402,6 +411,7 @@ function sessionFromRow(row) {
   return removeUndefined({
     id: row.id,
     created_at: row.created_at,
+    title: row.title || "",
     duration_seconds: row.duration_seconds,
     audio_path: row.audio_path,
     state: row.state,

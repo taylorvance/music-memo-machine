@@ -84,6 +84,7 @@ test("health reports the seeded temp library", async () => {
 test("seed writes normalized SQLite metadata", async () => {
   const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
   try {
+    assert.equal(db.prepare("PRAGMA table_info(sessions)").all().some((row) => row.name === "title"), true);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count, 7);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM bookmarks").get().count, 9);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM clips").get().count, 2);
@@ -110,6 +111,60 @@ test("seeded fixture sessions load with bookmarks, waveforms, and existing clips
   assert.ok(clipped);
   assert.equal(clipped.clip_details.length, 2);
   assert.equal(clipped.clip_details[0].audio_url.startsWith("/media/clips/"), true);
+});
+
+test("session title and notes updates persist to sidecar and SQLite", async () => {
+  const { response, body } = await request("/api/sessions/session-2026-05-02-001", {
+    method: "PATCH",
+    body: JSON.stringify({
+      title: "Warmup motif",
+      notes: "Name this before review"
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(body.title, "Warmup motif");
+  assert.equal(body.notes, "Name this before review");
+
+  const sessionJson = await readJson(path.join(libraryRoot, "sessions", "session-2026-05-02-001", "session.json"));
+  assert.equal(sessionJson.title, "Warmup motif");
+  assert.equal(sessionJson.notes, "Name this before review");
+
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    const row = db.prepare("SELECT title, notes FROM sessions WHERE id = ?").get("session-2026-05-02-001");
+    assert.equal(row.title, "Warmup motif");
+    assert.equal(row.notes, "Name this before review");
+  } finally {
+    db.close();
+  }
+});
+
+test("clip title and notes updates persist to sidecar and SQLite", async () => {
+  const { response, body } = await request("/api/clips/clip-2026-04-15-001", {
+    method: "PATCH",
+    body: JSON.stringify({
+      title: "Tighter riff",
+      notes: "Use second ending"
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(body.title, "Tighter riff");
+  assert.equal(body.notes, "Use second ending");
+
+  const clipJson = await readJson(path.join(libraryRoot, "clips", "clip-2026-04-15-001.json"));
+  assert.equal(clipJson.title, "Tighter riff");
+  assert.equal(clipJson.notes, "Use second ending");
+
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    const row = db.prepare("SELECT title, notes FROM clips WHERE id = ?").get("clip-2026-04-15-001");
+    assert.equal(row.title, "Tighter riff");
+    assert.equal(row.notes, "Use second ending");
+  } finally {
+    db.close();
+  }
 });
 
 test("saving a clip writes copied audio, clip metadata, and archival source state", async () => {

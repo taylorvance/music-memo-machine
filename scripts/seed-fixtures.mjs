@@ -300,6 +300,7 @@ async function main() {
     await writeJson(path.join(sessionDir, "session.json"), {
       id: fixture.id,
       created_at: fixture.created_at,
+      title: fixture.title || "",
       duration_seconds: fixture.duration_seconds,
       audio_path: "source.wav",
       state: fixture.state,

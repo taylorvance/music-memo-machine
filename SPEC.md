@@ -209,10 +209,11 @@ eventually produce clutter instead of useful music memos.
 
 V1 review UI should support:
 
-- session list
+- session and clip browse tabs with count badges
 - bookmarked/unbookmarked filters
 - unresolved/resolved state
 - session duration and created time
+- editable session title with the original date-index still visible below it
 - session notes
 - waveform display
 - visible bookmark markers
@@ -222,12 +223,20 @@ V1 review UI should support:
 - scrub and seek
 - range selection
 - save selected range as a clip
+- edit saved clip titles and notes after creation
 - support selecting the full session range when the whole session is worth
   keeping
 - delete or mark source session resolved
+- reversible review state controls: needs review, reviewed, and not useful
 - restore recoverable sessions from trash before their purge date
 - provide an out-of-the-way path to restore removed clips, because temporary
   retention should be recoverable through the UI and not only through an API
+
+Potential later UI metadata:
+
+- 5-star ratings for sessions and clips may be useful, but they should wait
+  until title, notes, restore, and review-state flows feel stable enough that
+  another ranking concept will not add noise
 
 The UI should work from:
 
@@ -415,6 +424,20 @@ target for the full local-review MVP. Its size and low power are attractive, but
 512MB RAM, one USB OTG path, and limited CPU headroom make it a better candidate
 for a thinner capture client after the review/lifecycle workflow is proven.
 
+If the hardware scope is pared back to recording and sync management only, the
+Zero 2 W is a strong small-board option to evaluate. In that shape, the device
+would reliably record WAVs, capture bookmarks, write session metadata, show
+simple physical status, maintain a local sync queue, and keep unsynced audio
+safe. It would not be responsible for local waveform generation, clip trimming,
+compression, or the full review UI.
+
+For that option, the thin-recorder lifecycle would be deliberately small: record
+locally, sync audio and metadata, mark sessions safe only after durable
+acknowledgement from the review host, delete oldest locally synced sessions when
+space is needed, and block new recording when no safe local deletion remains.
+The compression ladder would belong on the Pi 4-class local-review host or the
+Mac mini/cloud review host, not on the Zero 2 W capture appliance.
+
 The original Raspberry Pi Zero W should not be an MVP target for local web
 review. Its single-core CPU and 512MB RAM are too tight for the combined capture,
 review, waveform, compression, and lifecycle-management role.
@@ -495,6 +518,10 @@ Risks:
 The device records locally and syncs sessions to the Mac mini when online. The
 Mac mini hosts the review UI and performs heavier work such as waveform
 generation, compression, and clip extraction.
+
+This track is a natural fit to evaluate for a Pi Zero 2 W-class recorder. The
+recorder is a durable capture appliance, while the Mac mini or another review
+host owns the expensive and more iterative product surface.
 
 Advantages:
 
@@ -797,6 +824,7 @@ Prototype `session.json` shape:
 {
   "id": "session-2026-05-02-001",
   "created_at": "2026-05-02T20:15:00-05:00",
+  "title": "",
   "duration_seconds": 734.2,
   "audio_path": "source.wav",
   "state": "bookmarked",
@@ -962,6 +990,7 @@ Recommended fields:
 
 - stable id
 - created timestamp
+- optional title
 - duration
 - audio path
 - waveform/cache path
@@ -997,6 +1026,7 @@ Recommended fields:
 - source end seconds
 - audio path
 - title
+- notes
 - created timestamp
 - sync state
 

@@ -380,6 +380,7 @@ function classifySession(session, sim) {
   const age = ageDays(session.created_at, sim.as_of);
   const hasBookmarks = hasDurableBookmark(session);
   const hasClips = (session.clips || []).length > 0;
+  const hasTitle = Boolean((session.title || "").trim());
   const hasNotes = Boolean((session.notes || "").trim());
   const size = session.source_size_bytes || session.storage_size_bytes || 0;
   const isThrowaway = session.retention_class === "throwaway";
@@ -388,6 +389,7 @@ function classifySession(session, sim) {
     (isThrowaway &&
       !hasBookmarks &&
       !hasClips &&
+      !hasTitle &&
       !hasNotes &&
       age >= policy.unbookmarked_retention_days);
   const compressionCandidate =
@@ -404,7 +406,9 @@ function classifySession(session, sim) {
           ? "bookmarks"
           : hasClips
             ? "saved clips"
-            : "";
+            : hasTitle
+              ? "title"
+              : "";
 
   return {
     id: session.id,
@@ -560,6 +564,7 @@ app.patch("/api/sessions/:id", async (req, res, next) => {
       "retention_class",
       "compression_state",
       "sync_state",
+      "title",
       "notes",
       "bookmarks"
     ];

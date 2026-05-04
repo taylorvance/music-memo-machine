@@ -16,7 +16,7 @@ import {
   Trash2
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deleteClip, fetchClips, fetchSessions, fetchTrashedClips, fetchTrashedSessions, restoreClip, restoreSession, saveClip, updateSession } from "./api";
+import { deleteClip, fetchClips, fetchSessions, fetchTrashedClips, fetchTrashedSessions, restoreClip, restoreSession, saveClip, updateClip, updateSession } from "./api";
 import type { Clip, Session, TrashedClip, TrashedSession } from "./types";
 
 type Range = {
@@ -25,6 +25,8 @@ type Range = {
 };
 
 type RangeDragTarget = "select" | "start" | "end" | "move";
+type BrowseMode = "sessions" | "clips";
+type ReviewStatus = "needs_review" | "reviewed" | "not_useful";
 
 type RangeDragState = {
   target: RangeDragTarget;
@@ -72,6 +74,18 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function pluralize(count: number, singular: string) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function sessionIndexLabel(session: Pick<Session, "id">) {
+  return session.id.replace("session-", "");
+}
+
+function sessionDisplayTitle(session: Pick<Session, "id" | "title">) {
+  return session.title.trim() || sessionIndexLabel(session);
+}
+
 function cx(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -85,6 +99,12 @@ function sessionPriority(session: Session) {
   if (session.state === "unreviewed") return 1;
   if (session.clips.length > 0) return 2;
   return 3;
+}
+
+function reviewStatus(session: Session): ReviewStatus {
+  if (session.state === "dismissed") return "not_useful";
+  if (session.state === "unreviewed" || session.state === "bookmarked") return "needs_review";
+  return "reviewed";
 }
 
 function defaultRange(session: Session): Range {
@@ -111,7 +131,9 @@ export default function App() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [trashedSessions, setTrashedSessions] = useState<TrashedSession[]>([]);
   const [trashedClips, setTrashedClips] = useState<TrashedClip[]>([]);
+  const [browseMode, setBrowseMode] = useState<BrowseMode>("sessions");
   const [selectedId, setSelectedId] = useState("");
+  const [focusedClipId, setFocusedClipId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -123,12 +145,13 @@ export default function App() {
     });
   }, [sessions]);
 
+  const sortedClips = useMemo(() => {
+    return [...clips].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  }, [clips]);
+
   const selectedSession = sortedSessions.find((session) => session.id === selectedId) || sortedSessions[0];
+  const focusedClip = sortedClips.find((clip) => clip.id === focusedClipId) || null;
   const activeSessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
-  const linkedClipIds = useMemo(() => new Set(sessions.flatMap((session) => session.clips)), [sessions]);
-  const standaloneClips = useMemo(() => {
-    return clips.filter((clip) => !activeSessionIds.has(clip.source_session_id) || !linkedClipIds.has(clip.id));
-  }, [activeSessionIds, clips, linkedClipIds]);
 
   const reload = useCallback(async (preferredId?: string) => {
     const [next, nextClips, nextTrash, nextTrashedClips] = await Promise.all([fetchSessions(), fetchClips(), fetchTrashedSessions(), fetchTrashedClips()]);
@@ -171,6 +194,18 @@ export default function App() {
     await reload(restored.session?.id || selectedId);
   }
 
+  function selectSession(sessionId: string) {
+    setSelectedId(sessionId);
+    setFocusedClipId("");
+  }
+
+  function selectClip(clip: Clip) {
+    setFocusedClipId(clip.id);
+    if (activeSessionIds.has(clip.source_session_id)) {
+      setSelectedId(clip.source_session_id);
+    }
+  }
+
   return (
     <main className="app">
       <header className="topbar">
@@ -186,61 +221,71 @@ export default function App() {
       {error ? <div className="error">{error}</div> : null}
 
       <section className="layout">
-        <aside className="queue" aria-label="Sessions">
-          <h2>Sessions</h2>
-          <div className="session-list">
-            {sortedSessions.map((session) => (
-              <button
-                key={session.id}
-                className={cx("session-row", session.id === selectedSession?.id && "selected")}
-                type="button"
-                onClick={() => setSelectedId(session.id)}
-              >
-                <span className="session-title">{session.id.replace("session-", "")}</span>
-                <span className="session-meta">
-                  {formatDate(session.created_at)} · {formatDuration(session.duration_seconds)}
-                </span>
-                <span className="session-tags">
-                  {unresolvedBookmarkCount(session) > 0 ? <span>{unresolvedBookmarkCount(session)} bookmarks</span> : null}
-                  {session.clips.length > 0 ? <span>{session.clips.length} clips</span> : null}
-                  {session.state === "resolved" || session.state === "dismissed" ? <span>{session.state}</span> : null}
-                </span>
-              </button>
-            ))}
+        <aside className="queue" aria-label="Library browser">
+          <div className="browse-tabs" role="tablist" aria-label="Library browser">
+            <button className={cx(browseMode === "sessions" && "active")} type="button" onClick={() => setBrowseMode("sessions")} role="tab" aria-selected={browseMode === "sessions"}>
+              Sessions <span>{sortedSessions.length}</span>
+            </button>
+            <button className={cx(browseMode === "clips" && "active")} type="button" onClick={() => setBrowseMode("clips")} role="tab" aria-selected={browseMode === "clips"}>
+              Clips <span>{sortedClips.length}</span>
+            </button>
           </div>
-          {standaloneClips.length > 0 ? (
-            <div className="memo-section" aria-label="Standalone memos">
-              <div className="trash-header">
-                <h2>Memos</h2>
-                <span>{standaloneClips.length}</span>
-              </div>
-              <div className="memo-list">
-                {standaloneClips.map((clip) => (
-                  <div className="memo-row" key={clip.id}>
-                    <div>
-                      <strong>{clip.title || clip.id}</strong>
-                      <span>
-                        {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)} · {activeSessionIds.has(clip.source_session_id) ? "source active" : "source unavailable"}
-                      </span>
-                    </div>
-                    <audio controls src={clip.audio_url} />
-                  </div>
-                ))}
-              </div>
+          {browseMode === "sessions" ? (
+            <div className="session-list" role="tabpanel" aria-label="Sessions">
+              {sortedSessions.map((session) => (
+                <button
+                  key={session.id}
+                  className={cx("session-row", session.id === selectedSession?.id && "selected")}
+                  type="button"
+                  onClick={() => selectSession(session.id)}
+                >
+                  <span className="session-title">{sessionDisplayTitle(session)}</span>
+                  <span className="session-meta">
+                    {session.title.trim() ? `${sessionIndexLabel(session)} · ` : ""}
+                    {formatDate(session.created_at)} · {formatDuration(session.duration_seconds)}
+                  </span>
+                  <span className="session-tags">
+                    {unresolvedBookmarkCount(session) > 0 ? <span>{pluralize(unresolvedBookmarkCount(session), "bookmark")}</span> : null}
+                    {session.clips.length > 0 ? <span>{pluralize(session.clips.length, "clip")}</span> : null}
+                    {session.state === "resolved" || session.state === "dismissed" ? <span>{session.state}</span> : null}
+                  </span>
+                </button>
+              ))}
             </div>
-          ) : null}
+          ) : (
+            <div className="clip-list" role="tabpanel" aria-label="Clips">
+              {sortedClips.length > 0 ? (
+                sortedClips.map((clip) => {
+                  const sourceActive = activeSessionIds.has(clip.source_session_id);
+                  return (
+                    <div className={cx("clip-browse-row", clip.id === focusedClipId && "selected")} key={clip.id}>
+                      <button className="clip-browse-main" type="button" onClick={() => selectClip(clip)} disabled={!sourceActive}>
+                        <strong>{clip.title || clip.id}</strong>
+                        <span>
+                          {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)} · {sourceActive ? sessionIndexLabel({ id: clip.source_session_id }) : "source unavailable"}
+                        </span>
+                      </button>
+                      <audio controls src={clip.audio_url} />
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="empty compact">No saved clips.</p>
+              )}
+            </div>
+          )}
           {trashedSessions.length + trashedClips.length > 0 ? (
-            <div className="trash-section" aria-label="Recoverable items">
-              <div className="trash-header">
+            <details className="trash-section" aria-label="Recoverable items">
+              <summary className="trash-header">
                 <h2>Trash</h2>
                 <span>{trashedSessions.length + trashedClips.length}</span>
-              </div>
+              </summary>
               {trashedSessions.length > 0 ? (
                 <div className="trash-list">
                   {trashedSessions.map((item) => (
                     <div className="trash-row" key={item.id}>
                       <div>
-                        <strong>{item.id.replace("session-", "")}</strong>
+                        <strong>{item.session.title || sessionIndexLabel({ id: item.id })}</strong>
                         <span>
                           {formatDuration(item.session.duration_seconds)} · purges {formatDate(item.purge_after)}
                         </span>
@@ -269,7 +314,7 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
-            </div>
+            </details>
           ) : null}
         </aside>
 
@@ -280,6 +325,7 @@ export default function App() {
               busy={busy}
               onRun={run}
               onReload={() => reload(selectedSession.id)}
+              focusedClip={focusedClip?.source_session_id === selectedSession.id ? focusedClip : null}
               onSessionUpdated={(updated) => {
                 setSessions((current) => current.map((session) => (session.id === updated.id ? updated : session)));
               }}
@@ -298,12 +344,14 @@ function ReviewSession({
   busy,
   onRun,
   onReload,
+  focusedClip,
   onSessionUpdated
 }: {
   session: Session;
   busy: boolean;
   onRun: (action: () => Promise<void>) => Promise<void>;
   onReload: () => Promise<void>;
+  focusedClip: Clip | null;
   onSessionUpdated: (session: Session) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -311,12 +359,14 @@ function ReviewSession({
   const [isPlaying, setIsPlaying] = useState(false);
   const [range, setRange] = useState<Range>(() => defaultRange(session));
   const [precisionMode, setPrecisionMode] = useState(false);
+  const [sessionTitle, setSessionTitle] = useState(session.title || "");
   const [notes, setNotes] = useState(session.notes || "");
   const [clipTitle, setClipTitle] = useState("");
 
   useEffect(() => {
     const nextRange = defaultRange(session);
     setRange(nextRange);
+    setSessionTitle(session.title || "");
     setNotes(session.notes || "");
     setClipTitle("");
     setCurrentTime(nextRange.start);
@@ -326,6 +376,16 @@ function ReviewSession({
       audioRef.current.currentTime = nextRange.start;
     }
   }, [session.id]);
+
+  useEffect(() => {
+    if (!focusedClip) return;
+    const nextRange = {
+      start: focusedClip.source_start_seconds,
+      end: focusedClip.source_end_seconds
+    };
+    setRange(nextRange);
+    seek(nextRange.start);
+  }, [focusedClip?.id]);
 
   function seek(seconds: number) {
     const next = clamp(seconds, 0, session.duration_seconds);
@@ -376,11 +436,10 @@ function ReviewSession({
   }
 
   async function deleteSavedClip(clipId: string) {
-    if (!window.confirm("Delete this saved clip?")) return;
+    if (!window.confirm("Remove this saved clip?")) return;
     const result = await deleteClip(clipId);
     if (result.session) {
       onSessionUpdated(result.session);
-      return;
     }
     await onReload();
   }
@@ -388,6 +447,25 @@ function ReviewSession({
   async function patchSession(patch: Parameters<typeof updateSession>[1]) {
     const updated = await updateSession(session.id, patch);
     onSessionUpdated(updated);
+  }
+
+  function patchForStatus(status: ReviewStatus): Parameters<typeof updateSession>[1] {
+    if (status === "needs_review") {
+      const hasReviewMarkers = session.bookmarks.length > 0 || session.clips.length > 0;
+      return {
+        state: hasReviewMarkers ? "bookmarked" : "unreviewed",
+        retention_class: hasReviewMarkers ? "review_pending" : "throwaway"
+      };
+    }
+
+    if (status === "not_useful") {
+      return { state: "dismissed", retention_class: "throwaway" };
+    }
+
+    return {
+      state: "resolved",
+      retention_class: session.clips.length > 0 ? "archival_context" : "throwaway"
+    };
   }
 
   return (
@@ -402,76 +480,71 @@ function ReviewSession({
         onEnded={() => setIsPlaying(false)}
       />
 
-      <div className="review-header">
-        <div>
-          <h2>{session.id}</h2>
-          <p>
-            {formatDate(session.created_at)} · {formatDuration(session.duration_seconds)}
-          </p>
-        </div>
-        <span className="state-pill">{session.state.replace("_", " ")}</span>
-      </div>
-
-      <Waveform
-        session={session}
-        currentTime={currentTime}
-        range={range}
-        precisionMode={precisionMode}
-        onSeek={seek}
-        onRangeChange={setRange}
-        onPrecisionModeChange={setPrecisionMode}
-      />
-
-      <div className="transport">
-        <button className="icon-button" type="button" onClick={() => jumpBookmark("previous")} disabled={session.bookmarks.length === 0} title="Previous bookmark">
-          <SkipBack size={18} />
-        </button>
-        <button className="jump-button" type="button" onClick={() => jumpSeconds(-5)} disabled={currentTime <= 0} title="Back 5 seconds" aria-label="Back 5 seconds">
-          <Rewind size={17} />
-          <span>5s</span>
-        </button>
-        <button className="play-button" type="button" onClick={() => onRun(togglePlayback)} title={isPlaying ? "Pause" : "Play"}>
-          {isPlaying ? <Pause size={20} /> : <Play size={20} />}
-        </button>
-        <button
-          className="jump-button"
-          type="button"
-          onClick={() => jumpSeconds(5)}
-          disabled={currentTime >= session.duration_seconds}
-          title="Forward 5 seconds"
-          aria-label="Forward 5 seconds"
-        >
-          <FastForward size={17} />
-          <span>5s</span>
-        </button>
-        <button className="icon-button" type="button" onClick={() => jumpBookmark("next")} disabled={session.bookmarks.length === 0} title="Next bookmark">
-          <SkipForward size={18} />
-        </button>
-        <span className="time">
-          {formatDuration(currentTime)} / {formatDuration(session.duration_seconds)}
-        </span>
-      </div>
-
-      <section className="simple-panel">
-        <h3>Bookmarks</h3>
-        {session.bookmarks.length > 0 ? (
-          <div className="bookmark-list">
-            {session.bookmarks.map((bookmark) => (
-              <button key={bookmark.id} className={cx("bookmark-chip", bookmark.state !== "unresolved" && "muted")} type="button" onClick={() => seek(bookmark.timestamp_seconds)}>
-                <Bookmark size={15} />
-                {formatDuration(bookmark.timestamp_seconds)}
-                {bookmark.state !== "unresolved" ? <span>{bookmark.state}</span> : null}
-              </button>
-            ))}
+      <section className="session-panel">
+        <div className="review-header">
+          <div className="session-heading">
+            <label>
+              Title
+              <input value={sessionTitle} onChange={(event) => setSessionTitle(event.target.value)} placeholder="Session title" />
+            </label>
+            <p>
+              {sessionIndexLabel(session)} · {formatDate(session.created_at)} · {formatDuration(session.duration_seconds)}
+            </p>
           </div>
-        ) : (
-          <p className="empty compact">No bookmarks in this session.</p>
-        )}
+        </div>
+        <div className="session-panel-grid">
+          <div>
+            <h3>Bookmarks</h3>
+            {session.bookmarks.length > 0 ? (
+              <div className="bookmark-list">
+                {session.bookmarks.map((bookmark) => (
+                  <button key={bookmark.id} className={cx("bookmark-chip", bookmark.state !== "unresolved" && "muted")} type="button" onClick={() => seek(bookmark.timestamp_seconds)}>
+                    <Bookmark size={15} />
+                    {formatDuration(bookmark.timestamp_seconds)}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="empty compact">No bookmarks.</p>
+            )}
+          </div>
+          <div>
+            <h3>Notes</h3>
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
+            <button className="secondary-button fit" type="button" onClick={() => onRun(() => patchSession({ title: sessionTitle, notes }))} disabled={busy}>
+              <Save size={16} />
+              Save session
+            </button>
+          </div>
+        </div>
+        <div className="review-state-row" aria-label="Review state">
+          <span>Review state</span>
+          <button className={cx(reviewStatus(session) === "needs_review" && "active")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("needs_review")))} disabled={busy}>
+            Needs review
+          </button>
+          <button className={cx(reviewStatus(session) === "reviewed" && "active")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("reviewed")))} disabled={busy}>
+            <Check size={15} />
+            Reviewed
+          </button>
+          <button className={cx(reviewStatus(session) === "not_useful" && "active", "danger-choice")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("not_useful")))} disabled={busy}>
+            <Trash2 size={15} />
+            Not useful
+          </button>
+        </div>
       </section>
 
-      <section className="simple-panel">
-        <h3>Save a clip</h3>
-        <div className="range-row">
+      <section className="clip-workbench">
+        <Waveform
+          session={session}
+          currentTime={currentTime}
+          range={range}
+          precisionMode={precisionMode}
+          onSeek={seek}
+          onRangeChange={setRange}
+          onPrecisionModeChange={setPrecisionMode}
+        />
+
+        <div className="clip-save-row">
           <label>
             Start
             <input
@@ -504,26 +577,42 @@ function ReviewSession({
               }
             />
           </label>
-          <button className="secondary-button" type="button" onClick={() => setRange({ start: 0, end: session.duration_seconds })}>
-            Whole take
-          </button>
-        </div>
-        <div className="clip-row">
           <input value={clipTitle} onChange={(event) => setClipTitle(event.target.value)} placeholder="Optional clip title" />
           <button className="primary-button" type="button" onClick={() => onRun(saveSelectedClip)} disabled={busy || range.end <= range.start}>
             <Scissors size={16} />
             Save clip
           </button>
         </div>
-      </section>
 
-      <section className="simple-panel">
-        <h3>Notes</h3>
-        <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} />
-        <button className="secondary-button fit" type="button" onClick={() => onRun(() => patchSession({ notes }))} disabled={busy}>
-          <Save size={16} />
-          Save notes
-        </button>
+        <div className="transport">
+          <button className="icon-button" type="button" onClick={() => jumpBookmark("previous")} disabled={session.bookmarks.length === 0} title="Previous bookmark">
+            <SkipBack size={18} />
+          </button>
+          <button className="jump-button" type="button" onClick={() => jumpSeconds(-5)} disabled={currentTime <= 0} title="Back 5 seconds" aria-label="Back 5 seconds">
+            <Rewind size={17} />
+            <span>5s</span>
+          </button>
+          <button className="play-button" type="button" onClick={() => onRun(togglePlayback)} title={isPlaying ? "Pause" : "Play"}>
+            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+          </button>
+          <button
+            className="jump-button"
+            type="button"
+            onClick={() => jumpSeconds(5)}
+            disabled={currentTime >= session.duration_seconds}
+            title="Forward 5 seconds"
+            aria-label="Forward 5 seconds"
+          >
+            <FastForward size={17} />
+            <span>5s</span>
+          </button>
+          <button className="icon-button" type="button" onClick={() => jumpBookmark("next")} disabled={session.bookmarks.length === 0} title="Next bookmark">
+            <SkipForward size={18} />
+          </button>
+          <span className="time">
+            {formatDuration(currentTime)} / {formatDuration(session.duration_seconds)}
+          </span>
+        </div>
       </section>
 
       {session.clip_details.length > 0 ? (
@@ -531,46 +620,59 @@ function ReviewSession({
           <h3>Saved clips</h3>
           <div className="saved-clips">
             {session.clip_details.map((clip) => (
-              <div className="saved-clip" key={clip.id}>
-                <strong>{clip.title || clip.id}</strong>
-                <span>
-                  {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)}
-                </span>
-                <audio controls src={clip.audio_url} />
-                <button className="icon-button clip-delete-button" type="button" onClick={() => onRun(() => deleteSavedClip(clip.id))} disabled={busy} title="Delete clip">
-                  <Trash2 size={16} />
-                </button>
-              </div>
+              <SavedClipEditor clip={clip} busy={busy} key={clip.id} onRun={onRun} onReload={onReload} onDelete={deleteSavedClip} />
             ))}
           </div>
         </section>
       ) : null}
 
-      <div className="finish-row">
-        <button
-          className="secondary-button"
-          type="button"
-          onClick={() =>
-            onRun(() =>
-              patchSession({
-                state: "resolved",
-                retention_class: session.clips.length > 0 ? "archival_context" : "throwaway"
-              })
-            )
-          }
-          disabled={busy}
-        >
-          <Check size={16} />
-          Done
+    </div>
+  );
+}
+
+function SavedClipEditor({
+  clip,
+  busy,
+  onRun,
+  onReload,
+  onDelete
+}: {
+  clip: Clip;
+  busy: boolean;
+  onRun: (action: () => Promise<void>) => Promise<void>;
+  onReload: () => Promise<void>;
+  onDelete: (clipId: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(clip.title || "");
+  const [notes, setNotes] = useState(clip.notes || "");
+
+  useEffect(() => {
+    setTitle(clip.title || "");
+    setNotes(clip.notes || "");
+  }, [clip.id, clip.notes, clip.title]);
+
+  async function saveEdits() {
+    await updateClip(clip.id, { title, notes });
+    await onReload();
+  }
+
+  return (
+    <div className="saved-clip">
+      <div className="saved-clip-fields">
+        <input aria-label="Clip title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Clip title" />
+        <textarea aria-label="Clip notes" value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} placeholder="Clip notes" />
+        <span>
+          {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)}
+        </span>
+      </div>
+      <audio controls src={clip.audio_url} />
+      <div className="saved-clip-actions">
+        <button className="secondary-button fit" type="button" onClick={() => onRun(saveEdits)} disabled={busy}>
+          <Save size={15} />
+          Save
         </button>
-        <button
-          className="danger-button"
-          type="button"
-          onClick={() => onRun(() => patchSession({ state: "dismissed", retention_class: "throwaway" }))}
-          disabled={busy}
-        >
+        <button className="icon-button clip-delete-button" type="button" onClick={() => onRun(() => onDelete(clip.id))} disabled={busy} title="Remove clip">
           <Trash2 size={16} />
-          Dismiss
         </button>
       </div>
     </div>

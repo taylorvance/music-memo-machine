@@ -39,7 +39,7 @@ export function fetchTrashedSessions() {
 
 export function updateSession(
   id: string,
-  patch: Partial<Pick<Session, "notes" | "bookmarks">> & {
+  patch: Partial<Pick<Session, "title" | "notes" | "bookmarks">> & {
     state?: SessionState;
     retention_class?: RetentionClass;
     compression_state?: CompressionState;

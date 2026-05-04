@@ -123,11 +123,14 @@ h3 {
   gap: 8px;
 }
 
-.memo-section,
 .trash-section {
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+.trash-section:not([open]) .trash-header {
+  margin-bottom: 0;
 }
 
 .trash-header {
@@ -136,8 +139,79 @@ h3 {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 10px;
+  cursor: pointer;
 }
 
+.clip-list,
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.removed-clips {
+  margin-top: 10px;
+}
+
+.trash-row {
+  display: grid;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.trash-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.trash-row div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trash-row strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.trash-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.browse-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.browse-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-weight: 800;
+}
+
+.browse-tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.browse-tabs span,
 .trash-header span {
   display: inline-flex;
   align-items: center;
@@ -153,59 +227,44 @@ h3 {
   font-weight: 800;
 }
 
-.memo-list,
-.trash-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.removed-clips {
-  margin-top: 10px;
-}
-
-.memo-row,
-.trash-row {
+.clip-browse-row {
   display: grid;
-  min-width: 0;
+  gap: 8px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
 }
 
-.memo-row {
-  grid-template-columns: 1fr;
-  gap: 8px;
+.clip-browse-row.selected {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.trash-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.memo-row div,
-.trash-row div {
+.clip-browse-main {
   display: flex;
   min-width: 0;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
+  padding: 0;
+  text-align: left;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
 }
 
-.memo-row strong,
-.trash-row strong {
+.clip-browse-main strong {
   overflow-wrap: anywhere;
   font-size: 13px;
 }
 
-.memo-row span,
-.trash-row span {
+.clip-browse-main span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.memo-row audio {
+.clip-browse-row audio {
   width: 100%;
   height: 34px;
 }
@@ -243,19 +302,14 @@ h3 {
 
 .session-tags,
 .bookmark-list,
-.finish-row,
-.transport,
-.range-row,
-.clip-row {
+.transport {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.session-tags span,
-.state-pill,
-.bookmark-chip span {
+.session-tags span {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
@@ -276,7 +330,7 @@ h3 {
 .review-session {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   max-width: 960px;
 }
 
@@ -289,6 +343,24 @@ h3 {
 
 .review-header h2 {
   overflow-wrap: anywhere;
+}
+
+.session-heading {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-heading label {
+  width: 100%;
+}
+
+.session-heading input {
+  max-width: 520px;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .waveform-wrap {
@@ -501,6 +573,8 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
+.session-panel,
+.clip-workbench,
 .simple-panel {
   display: flex;
   flex-direction: column;
@@ -509,6 +583,81 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.clip-workbench {
+  gap: 8px;
+}
+
+.session-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr);
+  gap: 12px;
+}
+
+.session-panel-grid > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.review-state-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-state-row > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.review-state-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  font-weight: 800;
+}
+
+.review-state-row button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.review-state-row button.danger-choice {
+  color: var(--danger);
+}
+
+.review-state-row button.danger-choice.active {
+  border-color: #dda49c;
+  background: var(--danger-soft);
+}
+
+.clip-save-row {
+  display: grid;
+  grid-template-columns: 92px 92px minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.clip-save-row label {
+  width: 100%;
+}
+
+.clip-save-row > input {
+  min-width: 0;
 }
 
 .compact {
@@ -547,10 +696,6 @@ textarea {
   resize: vertical;
 }
 
-.clip-row input {
-  flex: 1 1 240px;
-}
-
 .fit {
   align-self: flex-start;
 }
@@ -563,8 +708,8 @@ textarea {
 
 .saved-clip {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto minmax(220px, 320px) auto;
-  align-items: center;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 320px) auto;
+  align-items: start;
   gap: 10px;
   min-width: 0;
   padding: 10px;
@@ -572,11 +717,14 @@ textarea {
   border-radius: 8px;
 }
 
-.saved-clip strong {
-  overflow-wrap: anywhere;
+.saved-clip-fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.saved-clip span {
+.saved-clip-fields span {
   color: var(--muted);
   font-size: 13px;
 }
@@ -584,6 +732,13 @@ textarea {
 .saved-clip audio {
   width: 100%;
   height: 34px;
+}
+
+.saved-clip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .clip-delete-button {
@@ -611,11 +766,20 @@ textarea {
     flex-direction: column;
   }
 
+  .session-panel-grid,
+  .clip-save-row {
+    grid-template-columns: 1fr;
+  }
+
   label {
     width: 100%;
   }
 
   .saved-clip {
     grid-template-columns: 1fr;
+  }
+
+  .saved-clip-actions {
+    justify-content: flex-start;
   }
 }

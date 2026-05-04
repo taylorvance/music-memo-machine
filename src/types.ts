@@ -40,6 +40,7 @@ export interface WaveformCache {
 export interface Session {
   id: string;
   created_at: string;
+  title: string;
   duration_seconds: number;
   audio_path: string;
   audio_url: string;
