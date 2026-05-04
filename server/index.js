@@ -105,6 +105,12 @@ async function loadClips() {
   return store.loadClipsMetadata().map((clip) => enrichClip(clip));
 }
 
+async function loadOptionalSession(sessionId) {
+  await ensureMetadataReady();
+  const session = store.loadSessionMetadata(sessionId);
+  return session ? enrichSession(session) : null;
+}
+
 async function saveSession(session) {
   await store.saveSessionMetadata(session);
 }
@@ -246,6 +252,41 @@ async function loadTrashedSessions() {
       deleted_at: manifest.deleted_at,
       purge_after: manifest.purge_after,
       session: manifest.session
+    });
+  }
+
+  return trashed.sort((a, b) => Date.parse(b.deleted_at || "") - Date.parse(a.deleted_at || ""));
+}
+
+async function clipSourceState(clip) {
+  if (store.loadSessionMetadata(clip.source_session_id)) {
+    return "active";
+  }
+  if (await loadSessionTrashManifest(clip.source_session_id)) {
+    return "trashed";
+  }
+  return "unavailable";
+}
+
+async function loadTrashedClips() {
+  await purgeExpiredTrash();
+  const root = path.join(libraryRoot, "trash", "clips");
+  if (!(await pathExists(root))) {
+    return [];
+  }
+
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const trashed = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const manifest = await loadClipTrashManifest(entry.name).catch(() => null);
+    if (!manifest?.clip) continue;
+    trashed.push({
+      id: entry.name,
+      deleted_at: manifest.deleted_at,
+      purge_after: manifest.purge_after,
+      source_state: await clipSourceState(manifest.clip),
+      clip: manifest.clip
     });
   }
 
@@ -616,6 +657,14 @@ app.patch("/api/clips/:id", async (req, res, next) => {
   }
 });
 
+app.get("/api/clips", async (_req, res, next) => {
+  try {
+    res.json(await loadClips());
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.delete("/api/clips/:id", async (req, res, next) => {
   try {
     const clip = await loadClip(req.params.id);
@@ -624,29 +673,90 @@ app.delete("/api/clips/:id", async (req, res, next) => {
       return;
     }
 
-    const session = await loadSession(clip.source_session_id);
-    session.clips = (session.clips || []).filter((clipId) => clipId !== clip.id);
+    const session = await loadOptionalSession(clip.source_session_id);
     const restoredBookmarkIds = [];
-    session.bookmarks = (session.bookmarks || []).map((bookmark) => {
-      if (bookmark.resulting_clip_id !== clip.id) return bookmark;
-      const { resulting_clip_id, ...rest } = bookmark;
-      restoredBookmarkIds.push(bookmark.id);
-      return {
-        ...rest,
-        state: "unresolved"
-      };
-    });
+    if (session) {
+      session.clips = (session.clips || []).filter((clipId) => clipId !== clip.id);
+      session.bookmarks = (session.bookmarks || []).map((bookmark) => {
+        if (bookmark.resulting_clip_id !== clip.id) return bookmark;
+        const { resulting_clip_id, ...rest } = bookmark;
+        restoredBookmarkIds.push(bookmark.id);
+        return {
+          ...rest,
+          state: "unresolved"
+        };
+      });
 
-    const nextState = sessionStateAfterClipDelete(session);
-    session.state = nextState.state;
-    session.retention_class = nextState.retention_class;
-    session.sync_state = session.sync_state === "synced" ? "pending_sync" : session.sync_state;
+      const nextState = sessionStateAfterClipDelete(session);
+      session.state = nextState.state;
+      session.retention_class = nextState.retention_class;
+      session.sync_state = session.sync_state === "synced" ? "pending_sync" : session.sync_state;
+    }
 
     store.deleteClipMetadata(clip.id);
-    await saveSession(session);
+    if (session) {
+      await saveSession(session);
+    }
     const trash = await trashClipFileArtifacts(clip, restoredBookmarkIds);
 
-    res.json({ session: await loadSession(session.id), deleted_clip_id: clip.id, purge_after: trash.purge_after });
+    res.json({
+      session: session ? await loadSession(session.id) : null,
+      deleted_clip_id: clip.id,
+      purge_after: trash.purge_after
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/trash/clips", async (_req, res, next) => {
+  try {
+    res.json(await loadTrashedClips());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/trash/clips/:id/restore", async (req, res, next) => {
+  try {
+    await ensureMetadataReady();
+    const manifest = await loadClipTrashManifest(req.params.id);
+    if (!manifest?.clip) {
+      res.status(404).json({ error: "Trashed clip not found" });
+      return;
+    }
+
+    const clip = manifest.clip;
+    await restoreClipFileArtifacts(clip);
+    await saveClip(clip);
+
+    let session = await loadOptionalSession(clip.source_session_id);
+    if (session) {
+      const restoredBookmarkIds = new Set(manifest.restored_bookmark_ids || []);
+      session.clips = Array.from(new Set([...(session.clips || []), clip.id]));
+      session.bookmarks = (session.bookmarks || []).map((bookmark) => {
+        if (!restoredBookmarkIds.has(bookmark.id)) return bookmark;
+        return {
+          ...bookmark,
+          state: "captured",
+          resulting_clip_id: clip.id
+        };
+      });
+      session.state = "archival_context";
+      session.retention_class = "archival_context";
+      session.sync_state = session.sync_state === "synced" ? "pending_sync" : session.sync_state;
+      await saveSession(session);
+      session = await loadSession(session.id);
+    }
+
+    await fs.rm(clipTrashDir(clip.id), { recursive: true, force: true });
+
+    res.json({
+      clip: await loadClip(clip.id),
+      session,
+      restored_clip_id: clip.id,
+      source_state: await clipSourceState(clip)
+    });
   } catch (error) {
     next(error);
   }

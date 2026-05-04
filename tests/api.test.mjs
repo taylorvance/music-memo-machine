@@ -160,7 +160,7 @@ test("saving a clip writes copied audio, clip metadata, and archival source stat
   }
 });
 
-test("deleting a clip moves copied audio to trash and restores captured bookmarks", async () => {
+test("deleting and restoring a clip moves files and relinks source bookmarks", async () => {
   const created = await request("/api/sessions/session-2026-05-02-005/clips", {
     method: "POST",
     body: JSON.stringify({
@@ -198,6 +198,9 @@ test("deleting a clip moves copied audio to trash and restores captured bookmark
   const clipTrashManifest = await readJson(clipTrashManifestPath);
   assert.equal(clipTrashManifest.clip.id, clip.id);
   assert.deepEqual(clipTrashManifest.restored_bookmark_ids, ["bookmark-001"]);
+  const trashList = await request("/api/trash/clips");
+  assert.equal(trashList.response.status, 200);
+  assert.equal(trashList.body.some((item) => item.id === clip.id && item.source_state === "active"), true);
 
   const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
   try {
@@ -207,6 +210,79 @@ test("deleting a clip moves copied audio to trash and restores captured bookmark
     db.close();
   }
 
+  const restored = await request(`/api/trash/clips/${clip.id}/restore`, {
+    method: "POST"
+  });
+
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.body.restored_clip_id, clip.id);
+  assert.equal(restored.body.source_state, "active");
+  assert.equal(restored.body.session.clips.includes(clip.id), true);
+  assert.equal(restored.body.session.bookmarks[0].state, "captured");
+  assert.equal(restored.body.session.bookmarks[0].resulting_clip_id, clip.id);
+  await fs.access(clipAudioPath);
+  await fs.access(clipJsonPath);
+  await assert.rejects(fs.access(path.join(libraryRoot, "trash", "clips", clip.id)));
+});
+
+test("restoring a trashed clip works when its source session is unavailable", async () => {
+  const created = await request("/api/sessions/session-2026-05-02-005/clips", {
+    method: "POST",
+    body: JSON.stringify({
+      source_start_seconds: 4,
+      source_end_seconds: 11,
+      title: "Standalone memo",
+      notes: ""
+    })
+  });
+  const clip = created.body.clip;
+
+  await request(`/api/clips/${clip.id}`, {
+    method: "DELETE"
+  });
+
+  const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
+  try {
+    assert.equal(db.prepare("PRAGMA foreign_key_list(clips)").all().some((row) => row.table === "sessions"), false);
+    db.prepare("DELETE FROM sessions WHERE id = ?").run(clip.source_session_id);
+  } finally {
+    db.close();
+  }
+
+  const trashList = await request("/api/trash/clips");
+  assert.equal(trashList.body.some((item) => item.id === clip.id && item.source_state === "unavailable"), true);
+
+  const restored = await request(`/api/trash/clips/${clip.id}/restore`, {
+    method: "POST"
+  });
+  assert.equal(restored.response.status, 200);
+  assert.equal(restored.body.restored_clip_id, clip.id);
+  assert.equal(restored.body.session, null);
+  assert.equal(restored.body.source_state, "unavailable");
+
+  const clips = await request("/api/clips");
+  assert.equal(clips.body.some((item) => item.id === clip.id && item.source_session_id === "session-2026-05-02-005"), true);
+  await fs.access(path.join(libraryRoot, "clips", clip.audio_path));
+  await assert.rejects(fs.access(path.join(libraryRoot, "trash", "clips", clip.id)));
+});
+
+test("expired trashed clips are garbage collected", async () => {
+  const created = await request("/api/sessions/session-2026-05-02-003/clips", {
+    method: "POST",
+    body: JSON.stringify({
+      source_start_seconds: 36,
+      source_end_seconds: 42,
+      title: "Purge me",
+      notes: ""
+    })
+  });
+  const clip = created.body.clip;
+  await request(`/api/clips/${clip.id}`, {
+    method: "DELETE"
+  });
+
+  const clipTrashManifestPath = path.join(libraryRoot, "trash", "clips", clip.id, "manifest.json");
+  const clipTrashManifest = await readJson(clipTrashManifestPath);
   await writeJson(clipTrashManifestPath, { ...clipTrashManifest, purge_after: "2000-01-01T00:00:00.000Z" });
   await request("/api/storage");
   await assert.rejects(fs.access(path.join(libraryRoot, "trash", "clips", clip.id)));

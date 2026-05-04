@@ -27,6 +27,8 @@ export interface Clip {
   storage_size_bytes: number;
 }
 
+export type TrashSourceState = "active" | "trashed" | "unavailable";
+
 export interface WaveformCache {
   session_id: string;
   generated_at: string;
@@ -101,6 +103,14 @@ export interface TrashedSession {
   deleted_at: string;
   purge_after: string;
   session: Omit<Session, "audio_url" | "source_size_bytes" | "actual_source_size_bytes" | "clip_details" | "waveform">;
+}
+
+export interface TrashedClip {
+  id: string;
+  deleted_at: string;
+  purge_after: string;
+  source_state: TrashSourceState;
+  clip: Omit<Clip, "audio_url">;
 }
 
 export type QueueFilter =

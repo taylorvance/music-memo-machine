@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 
 CREATE TABLE IF NOT EXISTS clips (
   id TEXT PRIMARY KEY,
-  source_session_id TEXT NOT NULL REFERENCES sessions(id),
+  source_session_id TEXT NOT NULL,
   source_start_seconds REAL NOT NULL,
   source_end_seconds REAL NOT NULL,
   audio_path TEXT NOT NULL,
@@ -71,6 +71,7 @@ export function createMetadataStore(libraryRoot) {
   const dbPath = path.join(libraryRoot, "metadata.sqlite");
   const db = new DatabaseSync(dbPath);
   db.exec(schema);
+  migrateSchema();
 
   function close() {
     db.close();
@@ -156,9 +157,11 @@ export function createMetadataStore(libraryRoot) {
   async function saveClipMetadata(clip) {
     transaction(() => {
       upsertClipRow(clip);
-      db.prepare(
-        "INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)"
-      ).run(clip.source_session_id, clip.id);
+      if (clip.source_session_id && sessionExists(clip.source_session_id)) {
+        db.prepare(
+          "INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)"
+        ).run(clip.source_session_id, clip.id);
+      }
     });
     await writeClipSidecar(libraryRoot, clip);
   }
@@ -181,6 +184,66 @@ export function createMetadataStore(libraryRoot) {
       db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  function sessionExists(sessionId) {
+    return db.prepare("SELECT 1 AS found FROM sessions WHERE id = ?").get(sessionId) !== undefined;
+  }
+
+  function migrateSchema() {
+    const clipForeignKeys = db.prepare("PRAGMA foreign_key_list(clips)").all();
+    if (clipForeignKeys.some((row) => row.table === "sessions")) {
+      db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        db.exec(`
+          CREATE TABLE clips_next (
+            id TEXT PRIMARY KEY,
+            source_session_id TEXT NOT NULL,
+            source_start_seconds REAL NOT NULL,
+            source_end_seconds REAL NOT NULL,
+            audio_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            sync_state TEXT NOT NULL,
+            storage_size_bytes INTEGER NOT NULL DEFAULT 0
+          );
+
+          INSERT INTO clips_next (
+            id,
+            source_session_id,
+            source_start_seconds,
+            source_end_seconds,
+            audio_path,
+            created_at,
+            title,
+            notes,
+            sync_state,
+            storage_size_bytes
+          )
+          SELECT
+            id,
+            source_session_id,
+            source_start_seconds,
+            source_end_seconds,
+            audio_path,
+            created_at,
+            title,
+            notes,
+            sync_state,
+            storage_size_bytes
+          FROM clips;
+
+          DROP TABLE clips;
+          ALTER TABLE clips_next RENAME TO clips;
+        `);
+      } finally {
+        db.exec("PRAGMA foreign_keys = ON");
+      }
+    }
+
+    db.exec("CREATE INDEX IF NOT EXISTS idx_clips_source_session ON clips(source_session_id)");
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("2", "schema_version");
   }
 
   function hydrateSession(row) {

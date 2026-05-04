@@ -1,4 +1,4 @@
-import type { Clip, CompressionState, RetentionClass, Session, SessionState, StorageSummary, SyncState, TrashedSession } from "./types";
+import type { Clip, CompressionState, RetentionClass, Session, SessionState, StorageSummary, SyncState, TrashedClip, TrashedSession } from "./types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -21,8 +21,16 @@ export function fetchSessions() {
   return request<Session[]>("/api/sessions");
 }
 
+export function fetchClips() {
+  return request<Clip[]>("/api/clips");
+}
+
 export function fetchStorage() {
   return request<StorageSummary>("/api/storage");
+}
+
+export function fetchTrashedClips() {
+  return request<TrashedClip[]>("/api/trash/clips");
 }
 
 export function fetchTrashedSessions() {
@@ -68,8 +76,14 @@ export function updateClip(id: string, patch: Partial<Pick<Clip, "title" | "note
 }
 
 export function deleteClip(id: string) {
-  return request<{ session: Session; deleted_clip_id: string; purge_after: string }>(`/api/clips/${id}`, {
+  return request<{ session: Session | null; deleted_clip_id: string; purge_after: string }>(`/api/clips/${id}`, {
     method: "DELETE"
+  });
+}
+
+export function restoreClip(id: string) {
+  return request<{ clip: Clip; session: Session | null; restored_clip_id: string; source_state: string }>(`/api/trash/clips/${id}/restore`, {
+    method: "POST"
   });
 }
 

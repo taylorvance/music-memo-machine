@@ -1,5 +1,6 @@
 import {
   ArchiveRestore,
+  AudioLines,
   Bookmark,
   Check,
   Crosshair,
@@ -15,8 +16,8 @@ import {
   Trash2
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deleteClip, fetchSessions, fetchTrashedSessions, restoreSession, saveClip, updateSession } from "./api";
-import type { Session, TrashedSession } from "./types";
+import { deleteClip, fetchClips, fetchSessions, fetchTrashedClips, fetchTrashedSessions, restoreClip, restoreSession, saveClip, updateSession } from "./api";
+import type { Clip, Session, TrashedClip, TrashedSession } from "./types";
 
 type Range = {
   start: number;
@@ -107,7 +108,9 @@ function fakePeaks(duration: number) {
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [clips, setClips] = useState<Clip[]>([]);
   const [trashedSessions, setTrashedSessions] = useState<TrashedSession[]>([]);
+  const [trashedClips, setTrashedClips] = useState<TrashedClip[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -121,11 +124,18 @@ export default function App() {
   }, [sessions]);
 
   const selectedSession = sortedSessions.find((session) => session.id === selectedId) || sortedSessions[0];
+  const activeSessionIds = useMemo(() => new Set(sessions.map((session) => session.id)), [sessions]);
+  const linkedClipIds = useMemo(() => new Set(sessions.flatMap((session) => session.clips)), [sessions]);
+  const standaloneClips = useMemo(() => {
+    return clips.filter((clip) => !activeSessionIds.has(clip.source_session_id) || !linkedClipIds.has(clip.id));
+  }, [activeSessionIds, clips, linkedClipIds]);
 
   const reload = useCallback(async (preferredId?: string) => {
-    const [next, nextTrash] = await Promise.all([fetchSessions(), fetchTrashedSessions()]);
+    const [next, nextClips, nextTrash, nextTrashedClips] = await Promise.all([fetchSessions(), fetchClips(), fetchTrashedSessions(), fetchTrashedClips()]);
     setSessions(next);
+    setClips(nextClips);
     setTrashedSessions(nextTrash);
+    setTrashedClips(nextTrashedClips);
     setSelectedId((current) => {
       const desired = preferredId || current;
       if (desired && next.some((session) => session.id === desired)) {
@@ -154,6 +164,11 @@ export default function App() {
   async function restoreTrashedSession(id: string) {
     const restored = await restoreSession(id);
     await reload(restored.session.id);
+  }
+
+  async function restoreTrashedClip(id: string) {
+    const restored = await restoreClip(id);
+    await reload(restored.session?.id || selectedId);
   }
 
   return (
@@ -193,27 +208,67 @@ export default function App() {
               </button>
             ))}
           </div>
-          {trashedSessions.length > 0 ? (
-            <div className="trash-section" aria-label="Recoverable sessions">
+          {standaloneClips.length > 0 ? (
+            <div className="memo-section" aria-label="Standalone memos">
               <div className="trash-header">
-                <h2>Trash</h2>
-                <span>{trashedSessions.length}</span>
+                <h2>Memos</h2>
+                <span>{standaloneClips.length}</span>
               </div>
-              <div className="trash-list">
-                {trashedSessions.map((item) => (
-                  <div className="trash-row" key={item.id}>
+              <div className="memo-list">
+                {standaloneClips.map((clip) => (
+                  <div className="memo-row" key={clip.id}>
                     <div>
-                      <strong>{item.id.replace("session-", "")}</strong>
+                      <strong>{clip.title || clip.id}</strong>
                       <span>
-                        {formatDuration(item.session.duration_seconds)} · purges {formatDate(item.purge_after)}
+                        {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)} · {activeSessionIds.has(clip.source_session_id) ? "source active" : "source unavailable"}
                       </span>
                     </div>
-                    <button className="icon-button" type="button" onClick={() => run(() => restoreTrashedSession(item.id))} disabled={busy} title="Restore session">
-                      <ArchiveRestore size={17} />
-                    </button>
+                    <audio controls src={clip.audio_url} />
                   </div>
                 ))}
               </div>
+            </div>
+          ) : null}
+          {trashedSessions.length + trashedClips.length > 0 ? (
+            <div className="trash-section" aria-label="Recoverable items">
+              <div className="trash-header">
+                <h2>Trash</h2>
+                <span>{trashedSessions.length + trashedClips.length}</span>
+              </div>
+              {trashedSessions.length > 0 ? (
+                <div className="trash-list">
+                  {trashedSessions.map((item) => (
+                    <div className="trash-row" key={item.id}>
+                      <div>
+                        <strong>{item.id.replace("session-", "")}</strong>
+                        <span>
+                          {formatDuration(item.session.duration_seconds)} · purges {formatDate(item.purge_after)}
+                        </span>
+                      </div>
+                      <button className="icon-button" type="button" onClick={() => run(() => restoreTrashedSession(item.id))} disabled={busy} title="Restore session">
+                        <ArchiveRestore size={17} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {trashedClips.length > 0 ? (
+                <div className="trash-list removed-clips">
+                  {trashedClips.map((item) => (
+                    <div className="trash-row" key={item.id}>
+                      <div>
+                        <strong>{item.clip.title || item.id}</strong>
+                        <span>
+                          {formatDuration(item.clip.source_start_seconds)}-{formatDuration(item.clip.source_end_seconds)} · {item.source_state === "active" ? "source active" : item.source_state === "trashed" ? "source in trash" : "source unavailable"}
+                        </span>
+                      </div>
+                      <button className="icon-button" type="button" onClick={() => run(() => restoreTrashedClip(item.id))} disabled={busy} title="Restore clip">
+                        <AudioLines size={17} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </aside>
@@ -323,7 +378,11 @@ function ReviewSession({
   async function deleteSavedClip(clipId: string) {
     if (!window.confirm("Delete this saved clip?")) return;
     const result = await deleteClip(clipId);
-    onSessionUpdated(result.session);
+    if (result.session) {
+      onSessionUpdated(result.session);
+      return;
+    }
+    await onReload();
   }
 
   async function patchSession(patch: Parameters<typeof updateSession>[1]) {
