@@ -301,7 +301,6 @@ h3 {
 }
 
 .session-tags,
-.bookmark-list,
 .transport {
   display: flex;
   align-items: center;
@@ -468,6 +467,36 @@ h3 {
   pointer-events: none;
 }
 
+.clip-bracket-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.clip-bracket {
+  position: absolute;
+  bottom: 12px;
+  min-width: 10px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-right: 2px solid #2f6f9f;
+  border-bottom: 2px solid #2f6f9f;
+  border-left: 2px solid #2f6f9f;
+  border-radius: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.clip-bracket:hover,
+.clip-bracket:focus-visible {
+  border-color: #225677;
+  background: rgba(47, 111, 159, 0.08);
+  outline: none;
+}
+
 .marker {
   position: absolute;
   top: 10px;
@@ -484,9 +513,59 @@ h3 {
   background: #fff1c8;
 }
 
-.marker.muted,
-.bookmark-chip.muted {
-  opacity: 0.55;
+.marker.selected {
+  box-shadow: 0 0 0 3px rgba(32, 36, 38, 0.2);
+}
+
+.marker-resolved {
+  opacity: 0.52;
+}
+
+.marker-dismissed {
+  opacity: 0.35;
+}
+
+.bookmark-popover {
+  position: absolute;
+  top: 45px;
+  z-index: 8;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 6px 18px rgba(32, 36, 38, 0.16);
+  transform: translateX(-50%);
+}
+
+.bookmark-popover button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.bookmark-popover button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.bookmark-popover button.danger-choice {
+  color: var(--danger);
+}
+
+.bookmark-popover button.danger-choice.active {
+  border-color: #dda49c;
+  background: var(--danger-soft);
 }
 
 .waveform-scale {
@@ -504,8 +583,7 @@ h3 {
 .fine-button,
 .primary-button,
 .secondary-button,
-.danger-button,
-.bookmark-chip {
+.danger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -589,13 +667,7 @@ h3 {
   gap: 8px;
 }
 
-.session-panel-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr);
-  gap: 12px;
-}
-
-.session-panel-grid > div {
+.session-notes {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -662,13 +734,6 @@ h3 {
 
 .compact {
   font-size: 13px;
-}
-
-.bookmark-chip {
-  padding: 7px 10px;
-  color: #6d4700;
-  background: #fff1c8;
-  font-weight: 800;
 }
 
 label {
@@ -766,7 +831,6 @@ textarea {
     flex-direction: column;
   }
 
-  .session-panel-grid,
   .clip-save-row {
     grid-template-columns: 1fr;
   }

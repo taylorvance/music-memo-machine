@@ -13,11 +13,12 @@ import {
   Scissors,
   SkipBack,
   SkipForward,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteClip, fetchClips, fetchSessions, fetchTrashedClips, fetchTrashedSessions, restoreClip, restoreSession, saveClip, updateClip, updateSession } from "./api";
-import type { Clip, Session, TrashedClip, TrashedSession } from "./types";
+import type { BookmarkState, Clip, Session, TrashedClip, TrashedSession } from "./types";
 
 type Range = {
   start: number;
@@ -26,7 +27,7 @@ type Range = {
 
 type RangeDragTarget = "select" | "start" | "end" | "move";
 type BrowseMode = "sessions" | "clips";
-type ReviewStatus = "needs_review" | "reviewed" | "not_useful";
+type ReviewStatus = "needs_review" | "resolved" | "dismissed";
 
 type RangeDragState = {
   target: RangeDragTarget;
@@ -102,9 +103,9 @@ function sessionPriority(session: Session) {
 }
 
 function reviewStatus(session: Session): ReviewStatus {
-  if (session.state === "dismissed") return "not_useful";
+  if (session.state === "dismissed") return "dismissed";
   if (session.state === "unreviewed" || session.state === "bookmarked") return "needs_review";
-  return "reviewed";
+  return "resolved";
 }
 
 function defaultRange(session: Session): Range {
@@ -117,6 +118,10 @@ function defaultRange(session: Session): Range {
     start: clamp(firstBookmark.timestamp_seconds - 8, 0, session.duration_seconds),
     end: clamp(firstBookmark.timestamp_seconds + 12, 1, session.duration_seconds)
   };
+}
+
+function normalizedBookmarkState(state: BookmarkState) {
+  return state === "captured" ? "resolved" : state;
 }
 
 function fakePeaks(duration: number) {
@@ -362,6 +367,7 @@ function ReviewSession({
   const [sessionTitle, setSessionTitle] = useState(session.title || "");
   const [notes, setNotes] = useState(session.notes || "");
   const [clipTitle, setClipTitle] = useState("");
+  const [selectedBookmarkId, setSelectedBookmarkId] = useState("");
 
   useEffect(() => {
     const nextRange = defaultRange(session);
@@ -369,6 +375,7 @@ function ReviewSession({
     setSessionTitle(session.title || "");
     setNotes(session.notes || "");
     setClipTitle("");
+    setSelectedBookmarkId("");
     setCurrentTime(nextRange.start);
     setIsPlaying(false);
     if (audioRef.current) {
@@ -384,6 +391,7 @@ function ReviewSession({
       end: focusedClip.source_end_seconds
     };
     setRange(nextRange);
+    setSelectedBookmarkId("");
     seek(nextRange.start);
   }, [focusedClip?.id]);
 
@@ -402,6 +410,7 @@ function ReviewSession({
       setIsPlaying(false);
       return;
     }
+    setSelectedBookmarkId("");
     await audioRef.current.play();
     setIsPlaying(true);
   }
@@ -414,11 +423,13 @@ function ReviewSession({
         : [...sorted].reverse().find((bookmark) => bookmark.timestamp_seconds < currentTime - 0.2) || sorted[sorted.length - 1];
 
     if (next) {
+      setSelectedBookmarkId("");
       seek(next.timestamp_seconds);
     }
   }
 
   function jumpSeconds(seconds: number) {
+    setSelectedBookmarkId("");
     seek(currentTime + seconds);
   }
 
@@ -427,10 +438,7 @@ function ReviewSession({
       source_start_seconds: range.start,
       source_end_seconds: range.end,
       title: clipTitle,
-      notes: "",
-      bookmark_ids: session.bookmarks
-        .filter((bookmark) => bookmark.timestamp_seconds >= range.start && bookmark.timestamp_seconds <= range.end)
-        .map((bookmark) => bookmark.id)
+      notes: ""
     });
     await onReload();
   }
@@ -449,6 +457,15 @@ function ReviewSession({
     onSessionUpdated(updated);
   }
 
+  async function setBookmarkState(bookmarkId: string, state: BookmarkState) {
+    await patchSession({
+      bookmarks: session.bookmarks.map((bookmark) => ({
+        ...bookmark,
+        state: bookmark.id === bookmarkId ? state : normalizedBookmarkState(bookmark.state)
+      }))
+    });
+  }
+
   function patchForStatus(status: ReviewStatus): Parameters<typeof updateSession>[1] {
     if (status === "needs_review") {
       const hasReviewMarkers = session.bookmarks.length > 0 || session.clips.length > 0;
@@ -458,13 +475,14 @@ function ReviewSession({
       };
     }
 
-    if (status === "not_useful") {
+    if (status === "dismissed") {
       return { state: "dismissed", retention_class: "throwaway" };
     }
 
+    const hasDurableContext = session.clips.length > 0 || session.bookmarks.some((bookmark) => bookmark.state !== "dismissed");
     return {
       state: "resolved",
-      retention_class: session.clips.length > 0 ? "archival_context" : "throwaway"
+      retention_class: hasDurableContext ? "archival_context" : "throwaway"
     };
   }
 
@@ -492,43 +510,45 @@ function ReviewSession({
             </p>
           </div>
         </div>
-        <div className="session-panel-grid">
-          <div>
-            <h3>Bookmarks</h3>
-            {session.bookmarks.length > 0 ? (
-              <div className="bookmark-list">
-                {session.bookmarks.map((bookmark) => (
-                  <button key={bookmark.id} className={cx("bookmark-chip", bookmark.state !== "unresolved" && "muted")} type="button" onClick={() => seek(bookmark.timestamp_seconds)}>
-                    <Bookmark size={15} />
-                    {formatDuration(bookmark.timestamp_seconds)}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="empty compact">No bookmarks.</p>
-            )}
-          </div>
-          <div>
-            <h3>Notes</h3>
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
-            <button className="secondary-button fit" type="button" onClick={() => onRun(() => patchSession({ title: sessionTitle, notes }))} disabled={busy}>
-              <Save size={16} />
-              Save session
-            </button>
-          </div>
+        <div className="session-notes">
+          <h3>Notes</h3>
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} />
+          <button className="secondary-button fit" type="button" onClick={() => onRun(() => patchSession({ title: sessionTitle, notes }))} disabled={busy}>
+            <Save size={16} />
+            Save session
+          </button>
         </div>
-        <div className="review-state-row" aria-label="Review state">
-          <span>Review state</span>
-          <button className={cx(reviewStatus(session) === "needs_review" && "active")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("needs_review")))} disabled={busy}>
+        <div className="review-state-row" role="radiogroup" aria-label="Session state">
+          <span>Session state</span>
+          <button
+            className={cx(reviewStatus(session) === "needs_review" && "active")}
+            type="button"
+            role="radio"
+            aria-checked={reviewStatus(session) === "needs_review"}
+            onClick={() => onRun(() => patchSession(patchForStatus("needs_review")))}
+            disabled={busy}
+          >
             Needs review
           </button>
-          <button className={cx(reviewStatus(session) === "reviewed" && "active")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("reviewed")))} disabled={busy}>
-            <Check size={15} />
-            Reviewed
+          <button
+            className={cx(reviewStatus(session) === "resolved" && "active")}
+            type="button"
+            role="radio"
+            aria-checked={reviewStatus(session) === "resolved"}
+            onClick={() => onRun(() => patchSession(patchForStatus("resolved")))}
+            disabled={busy}
+          >
+            Resolved
           </button>
-          <button className={cx(reviewStatus(session) === "not_useful" && "active", "danger-choice")} type="button" onClick={() => onRun(() => patchSession(patchForStatus("not_useful")))} disabled={busy}>
-            <Trash2 size={15} />
-            Not useful
+          <button
+            className={cx(reviewStatus(session) === "dismissed" && "active", "danger-choice")}
+            type="button"
+            role="radio"
+            aria-checked={reviewStatus(session) === "dismissed"}
+            onClick={() => onRun(() => patchSession(patchForStatus("dismissed")))}
+            disabled={busy}
+          >
+            Dismissed
           </button>
         </div>
       </section>
@@ -539,9 +559,17 @@ function ReviewSession({
           currentTime={currentTime}
           range={range}
           precisionMode={precisionMode}
+          busy={busy}
+          selectedBookmarkId={selectedBookmarkId}
           onSeek={seek}
           onRangeChange={setRange}
           onPrecisionModeChange={setPrecisionMode}
+          onBookmarkSelect={(bookmark) => {
+            setSelectedBookmarkId(bookmark.id);
+            seek(bookmark.timestamp_seconds);
+          }}
+          onBookmarkDismiss={() => setSelectedBookmarkId("")}
+          onBookmarkStateChange={(bookmarkId, state) => onRun(() => setBookmarkState(bookmarkId, state))}
         />
 
         <div className="clip-save-row">
@@ -684,17 +712,27 @@ function Waveform({
   currentTime,
   range,
   precisionMode,
+  busy,
+  selectedBookmarkId,
   onSeek,
   onRangeChange,
-  onPrecisionModeChange
+  onPrecisionModeChange,
+  onBookmarkSelect,
+  onBookmarkDismiss,
+  onBookmarkStateChange
 }: {
   session: Session;
   currentTime: number;
   range: Range;
   precisionMode: boolean;
+  busy: boolean;
+  selectedBookmarkId: string;
   onSeek: (time: number) => void;
   onRangeChange: (range: Range) => void;
   onPrecisionModeChange: (enabled: boolean) => void;
+  onBookmarkSelect: (bookmark: Session["bookmarks"][number]) => void;
+  onBookmarkDismiss: () => void;
+  onBookmarkStateChange: (bookmarkId: string, state: BookmarkState) => void;
 }) {
   const waveformRef = useRef<HTMLDivElement | null>(null);
   const dragState = useRef<RangeDragState | null>(null);
@@ -727,6 +765,7 @@ function Waveform({
       rectWidth: rect.width
     };
 
+    onBookmarkDismiss();
     onSeek(target === "start" ? range.start : target === "end" ? range.end : anchorTime);
     waveformRef.current?.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -886,22 +925,108 @@ function Waveform({
           />
         </div>
         <div className="playhead" style={{ left: `${(currentTime / session.duration_seconds) * 100}%` }} />
-        {session.bookmarks.map((bookmark) => (
-          <button
-            key={bookmark.id}
-            className={cx("marker", bookmark.state !== "unresolved" && "muted")}
-            type="button"
-            style={{ left: `${(bookmark.timestamp_seconds / session.duration_seconds) * 100}%` }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSeek(bookmark.timestamp_seconds);
-            }}
-            title={`Bookmark at ${formatDuration(bookmark.timestamp_seconds)}`}
-          >
-            <Bookmark size={14} />
-          </button>
-        ))}
+        {session.clip_details.length > 0 ? (
+          <div className="clip-bracket-layer" aria-label="Saved clip ranges">
+            {session.clip_details.map((clip) => {
+              const clipStart = clamp(clip.source_start_seconds, 0, session.duration_seconds);
+              const clipEnd = clamp(clip.source_end_seconds, clipStart, session.duration_seconds);
+              const left = (clipStart / session.duration_seconds) * 100;
+              const width = ((clipEnd - clipStart) / session.duration_seconds) * 100;
+              const label = `${clip.title.trim() || "Saved clip"} · ${formatDuration(clip.source_start_seconds)}-${formatDuration(clip.source_end_seconds)}`;
+
+              return (
+                <button
+                  key={clip.id}
+                  className="clip-bracket"
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onBookmarkDismiss();
+                    onRangeChange({
+                      start: clip.source_start_seconds,
+                      end: clip.source_end_seconds
+                    });
+                    onSeek(clip.source_start_seconds);
+                  }}
+                />
+              );
+            })}
+          </div>
+        ) : null}
+        {session.bookmarks.map((bookmark) => {
+          const bookmarkState = normalizedBookmarkState(bookmark.state);
+          const left = (bookmark.timestamp_seconds / session.duration_seconds) * 100;
+          const label = `Select bookmark at ${formatDuration(bookmark.timestamp_seconds)}`;
+
+          return (
+            <div key={bookmark.id}>
+              <button
+                className={cx("marker", `marker-${bookmarkState}`, bookmark.id === selectedBookmarkId && "selected")}
+                type="button"
+                style={{ left: `${left}%` }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onBookmarkSelect(bookmark);
+                }}
+                aria-label={label}
+                title={label}
+              >
+                <Bookmark size={14} />
+              </button>
+              {bookmark.id === selectedBookmarkId ? (
+                <div className="bookmark-popover" style={{ left: `${clamp(left, 8, 92)}%` }} role="toolbar" aria-label={`Bookmark ${formatDuration(bookmark.timestamp_seconds)} state`}>
+                  <button
+                    className={cx(bookmarkState === "unresolved" && "active")}
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onBookmarkStateChange(bookmark.id, "unresolved");
+                    }}
+                    disabled={busy}
+                    aria-label="Mark bookmark unresolved"
+                    title="Unresolved"
+                  >
+                    <Bookmark size={14} />
+                  </button>
+                  <button
+                    className={cx(bookmarkState === "resolved" && "active")}
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onBookmarkStateChange(bookmark.id, "resolved");
+                    }}
+                    disabled={busy}
+                    aria-label="Mark bookmark resolved"
+                    title="Resolved"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    className={cx(bookmarkState === "dismissed" && "active", "danger-choice")}
+                    type="button"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onBookmarkStateChange(bookmark.id, "dismissed");
+                    }}
+                    disabled={busy}
+                    aria-label="Dismiss bookmark"
+                    title="Dismissed"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
       <div className="waveform-scale">
         <span>

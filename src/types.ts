@@ -2,7 +2,7 @@ export type SessionState = "unreviewed" | "bookmarked" | "resolved" | "dismissed
 export type RetentionClass = "throwaway" | "review_pending" | "archival_context" | "protected";
 export type CompressionState = "raw_wav" | "flac" | "lossy" | "pending_compression";
 export type SyncState = "local_only" | "pending_sync" | "synced" | "sync_failed";
-export type BookmarkState = "unresolved" | "captured" | "dismissed";
+export type BookmarkState = "unresolved" | "resolved" | "dismissed" | "captured";
 
 export interface Bookmark {
   id: string;
@@ -10,7 +10,6 @@ export interface Bookmark {
   created_at?: string;
   state: BookmarkState;
   note: string;
-  resulting_clip_id?: string;
 }
 
 export interface Clip {

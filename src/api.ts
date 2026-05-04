@@ -59,7 +59,7 @@ export function saveClip(
     source_end_seconds: number;
     title: string;
     notes: string;
-    bookmark_ids?: string[];
+    resolved_bookmark_ids?: string[];
   }
 ) {
   return request<{ session: Session; clip: Clip }>(`/api/sessions/${sessionId}/clips`, {

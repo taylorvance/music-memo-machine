@@ -194,7 +194,13 @@ Metadata per bookmark should include:
 - timestamp within the session
 - wall-clock created time if available
 - optional label or note later, from the review UI
-- resolution state once the bookmark has been reviewed or captured
+- resolution state once the bookmark has been reviewed
+
+Resolved is a review state, not a hard link to a clip. If a player clicks the
+bookmark button just after a take ends, the review UI should let the saved clip
+resolve that bookmark without forcing the clip trim to include the late click or
+trailing silence. Related clips should be inferred from source session and time
+range context instead of storing a bookmark-to-clip id in the bookmark schema.
 
 The session remains the source of truth until useful clips are extracted.
 After extraction, saved clips are first-class music memo assets. A source
@@ -218,7 +224,8 @@ V1 review UI should support:
 - waveform display
 - visible bookmark markers
 - playback
-- click bookmark to jump to that timestamp
+- bookmark markers select and seek to that timestamp, with a contextual state
+  toolbar for unresolved, resolved, or dismissed
 - previous/next bookmark navigation
 - scrub and seek
 - range selection
@@ -227,7 +234,7 @@ V1 review UI should support:
 - support selecting the full session range when the whole session is worth
   keeping
 - delete or mark source session resolved
-- reversible review state controls: needs review, reviewed, and not useful
+- reversible review state controls: needs review, resolved, and dismissed
 - restore recoverable sessions from trash before their purge date
 - provide an out-of-the-way path to restore removed clips, because temporary
   retention should be recoverable through the UI and not only through an API
@@ -645,7 +652,7 @@ Required flow:
 5. select a trim range
 6. save the range as a copied clip file
 7. add or edit session notes
-8. mark bookmarks captured or dismissed
+8. mark bookmarks resolved or dismissed
 9. mark source session resolved, archived as context, or dismissed
 10. verify the source session's lifecycle status and storage behavior
 
@@ -896,14 +903,14 @@ Saving a clip should:
 1. copy audio into a new clip file
 2. write clip metadata
 3. link the clip id from the source session
-4. move any captured bookmarks to `captured`
+4. move any resolved-by-context bookmarks to `resolved`
 5. mark the source session `archival_context` unless the user dismisses it
 
 Removing a clip should:
 
 1. unlink it from the active source session if that session is available
 2. move the copied clip audio and metadata to clip trash
-3. restore any bookmarks that were marked captured only by that clip
+3. leave bookmark review state unchanged
 4. retain enough clip metadata to restore the clip as a standalone memo even if
    the source session is trashed or unavailable
 5. purge the trashed clip only after the trash retention window
@@ -1013,8 +1020,7 @@ Recommended fields:
 - timestamp seconds
 - created timestamp
 - optional note
-- state: unresolved, captured, dismissed
-- resulting clip id if captured
+- state: unresolved, resolved, dismissed
 
 ### Clip
 

@@ -159,16 +159,14 @@ const sessions = [
         id: "bookmark-001",
         timestamp_seconds: 22.5,
         created_at: "2026-04-15T21:42:23-05:00",
-        state: "captured",
-        resulting_clip_id: "clip-2026-04-15-001",
+        state: "resolved",
         note: "Main riff"
       },
       {
         id: "bookmark-002",
         timestamp_seconds: 61.8,
         created_at: "2026-04-15T21:43:02-05:00",
-        state: "captured",
-        resulting_clip_id: "clip-2026-04-15-002",
+        state: "resolved",
         note: "Bridge sketch"
       }
     ],

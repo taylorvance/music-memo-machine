@@ -85,8 +85,10 @@ test("seed writes normalized SQLite metadata", async () => {
   const db = new DatabaseSync(path.join(libraryRoot, "metadata.sqlite"));
   try {
     assert.equal(db.prepare("PRAGMA table_info(sessions)").all().some((row) => row.name === "title"), true);
+    assert.equal(db.prepare("PRAGMA table_info(bookmarks)").all().some((row) => row.name === "resulting_clip_id"), false);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count, 7);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM bookmarks").get().count, 9);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM bookmarks WHERE state = 'captured'").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM clips").get().count, 2);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM session_clips").get().count, 2);
   } finally {
@@ -183,8 +185,8 @@ test("saving a clip writes copied audio, clip metadata, and archival source stat
   assert.equal(body.clip.source_session_id, "session-2026-05-02-003");
   assert.equal(body.session.state, "archival_context");
   assert.equal(body.session.retention_class, "archival_context");
-  assert.equal(body.session.bookmarks[0].state, "captured");
-  assert.equal(body.session.bookmarks[0].resulting_clip_id, body.clip.id);
+  assert.equal(body.session.bookmarks[0].state, "resolved");
+  assert.equal("resulting_clip_id" in body.session.bookmarks[0], false);
   assert.equal(body.session.clips.includes(body.clip.id), true);
 
   const clipAudioPath = path.join(libraryRoot, "clips", body.clip.audio_path);
@@ -208,14 +210,37 @@ test("saving a clip writes copied audio, clip metadata, and archival source stat
     );
     assert.equal(
       db.prepare("SELECT state FROM bookmarks WHERE session_id = ? AND id = ?").get("session-2026-05-02-003", "bookmark-001").state,
-      "captured"
+      "resolved"
     );
   } finally {
     db.close();
   }
 });
 
-test("deleting and restoring a clip moves files and relinks source bookmarks", async () => {
+test("saving a clip resolves a nearby trailing bookmark without including it in the clipped audio", async () => {
+  const { response, body } = await request("/api/sessions/session-2026-05-01-004/clips", {
+    method: "POST",
+    body: JSON.stringify({
+      source_start_seconds: 34,
+      source_end_seconds: 42,
+      title: "Late bookmark trim",
+      notes: ""
+    })
+  });
+
+  const resolved = body.session.bookmarks.find((bookmark) => bookmark.id === "bookmark-002");
+  const unrelated = body.session.bookmarks.find((bookmark) => bookmark.id === "bookmark-003");
+
+  assert.equal(response.status, 201);
+  assert.equal(body.clip.source_start_seconds, 34);
+  assert.equal(body.clip.source_end_seconds, 42);
+  assert.equal(resolved.timestamp_seconds > body.clip.source_end_seconds, true);
+  assert.equal(resolved.state, "resolved");
+  assert.equal("resulting_clip_id" in resolved, false);
+  assert.equal(unrelated.state, "unresolved");
+});
+
+test("deleting and restoring a clip moves files without owning source bookmark resolution", async () => {
   const created = await request("/api/sessions/session-2026-05-02-005/clips", {
     method: "POST",
     body: JSON.stringify({
@@ -241,10 +266,10 @@ test("deleting and restoring a clip moves files and relinks source bookmarks", a
   assert.match(body.purge_after, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(body.session.clips.includes(clip.id), false);
   assert.equal(body.session.clip_details.some((item) => item.id === clip.id), false);
-  assert.equal(body.session.state, "bookmarked");
-  assert.equal(body.session.retention_class, "review_pending");
-  assert.equal(body.session.bookmarks[0].state, "unresolved");
-  assert.equal(body.session.bookmarks[0].resulting_clip_id, undefined);
+  assert.equal(body.session.state, "resolved");
+  assert.equal(body.session.retention_class, "archival_context");
+  assert.equal(body.session.bookmarks[0].state, "resolved");
+  assert.equal("resulting_clip_id" in body.session.bookmarks[0], false);
   await assert.rejects(fs.access(clipAudioPath));
   await assert.rejects(fs.access(clipJsonPath));
   await fs.access(path.join(libraryRoot, "trash", "clips", clip.id, clip.audio_path));
@@ -252,7 +277,7 @@ test("deleting and restoring a clip moves files and relinks source bookmarks", a
   const clipTrashManifestPath = path.join(libraryRoot, "trash", "clips", clip.id, "manifest.json");
   const clipTrashManifest = await readJson(clipTrashManifestPath);
   assert.equal(clipTrashManifest.clip.id, clip.id);
-  assert.deepEqual(clipTrashManifest.restored_bookmark_ids, ["bookmark-001"]);
+  assert.equal("restored_bookmark_ids" in clipTrashManifest, false);
   const trashList = await request("/api/trash/clips");
   assert.equal(trashList.response.status, 200);
   assert.equal(trashList.body.some((item) => item.id === clip.id && item.source_state === "active"), true);
@@ -273,8 +298,8 @@ test("deleting and restoring a clip moves files and relinks source bookmarks", a
   assert.equal(restored.body.restored_clip_id, clip.id);
   assert.equal(restored.body.source_state, "active");
   assert.equal(restored.body.session.clips.includes(clip.id), true);
-  assert.equal(restored.body.session.bookmarks[0].state, "captured");
-  assert.equal(restored.body.session.bookmarks[0].resulting_clip_id, clip.id);
+  assert.equal(restored.body.session.bookmarks[0].state, "resolved");
+  assert.equal("resulting_clip_id" in restored.body.session.bookmarks[0], false);
   await fs.access(clipAudioPath);
   await fs.access(clipJsonPath);
   await assert.rejects(fs.access(path.join(libraryRoot, "trash", "clips", clip.id)));

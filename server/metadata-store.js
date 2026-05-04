@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS bookmarks (
   created_at TEXT,
   state TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT '',
-  resulting_clip_id TEXT,
   PRIMARY KEY (session_id, id)
 );
 
@@ -249,7 +248,57 @@ export function createMetadataStore(libraryRoot) {
     }
 
     db.exec("CREATE INDEX IF NOT EXISTS idx_clips_source_session ON clips(source_session_id)");
-    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("3", "schema_version");
+    migrateBookmarksSchema();
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("4", "schema_version");
+  }
+
+  function migrateBookmarksSchema() {
+    const bookmarkColumns = db.prepare("PRAGMA table_info(bookmarks)").all();
+    const hasResultingClipId = bookmarkColumns.some((row) => row.name === "resulting_clip_id");
+
+    if (!hasResultingClipId) {
+      db.prepare("UPDATE bookmarks SET state = ? WHERE state = ?").run("resolved", "captured");
+      return;
+    }
+
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      db.exec(`
+        CREATE TABLE bookmarks_next (
+          id TEXT NOT NULL,
+          session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          timestamp_seconds REAL NOT NULL,
+          created_at TEXT,
+          state TEXT NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (session_id, id)
+        );
+
+        INSERT INTO bookmarks_next (
+          id,
+          session_id,
+          timestamp_seconds,
+          created_at,
+          state,
+          note
+        )
+        SELECT
+          id,
+          session_id,
+          timestamp_seconds,
+          created_at,
+          CASE state WHEN 'captured' THEN 'resolved' ELSE state END,
+          note
+        FROM bookmarks;
+
+        DROP TABLE bookmarks;
+        ALTER TABLE bookmarks_next RENAME TO bookmarks;
+      `);
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON");
+    }
+
+    db.exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_session_time ON bookmarks(session_id, timestamp_seconds)");
   }
 
   function hydrateSession(row) {
@@ -324,9 +373,8 @@ export function createMetadataStore(libraryRoot) {
         timestamp_seconds,
         created_at,
         state,
-        note,
-        resulting_clip_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+        note
+      ) VALUES (?, ?, ?, ?, ?, ?)`
     );
 
     for (const bookmark of bookmarks) {
@@ -335,9 +383,8 @@ export function createMetadataStore(libraryRoot) {
         sessionId,
         bookmark.timestamp_seconds,
         bookmark.created_at ?? null,
-        bookmark.state,
-        bookmark.note || "",
-        bookmark.resulting_clip_id ?? null
+        normalizeBookmarkState(bookmark.state),
+        bookmark.note || ""
       );
     }
   }
@@ -433,9 +480,8 @@ function bookmarkFromRow(row) {
     id: row.id,
     timestamp_seconds: row.timestamp_seconds,
     created_at: row.created_at ?? undefined,
-    state: row.state,
-    note: row.note || "",
-    resulting_clip_id: row.resulting_clip_id ?? undefined
+    state: normalizeBookmarkState(row.state),
+    note: row.note || ""
   });
 }
 
@@ -456,6 +502,10 @@ function clipFromRow(row) {
 
 function removeUndefined(value) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function normalizeBookmarkState(state) {
+  return state === "captured" ? "resolved" : state;
 }
 
 async function readSessionSidecars(libraryRoot) {
@@ -511,7 +561,13 @@ function stripRuntimeSessionFields(session) {
     clip_details,
     ...persisted
   } = session;
-  return persisted;
+  return {
+    ...persisted,
+    bookmarks: (persisted.bookmarks || []).map(({ resulting_clip_id, ...bookmark }) => ({
+      ...bookmark,
+      state: normalizeBookmarkState(bookmark.state)
+    }))
+  };
 }
 
 function stripRuntimeClipFields(clip) {

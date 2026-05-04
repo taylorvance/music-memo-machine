@@ -8,6 +8,7 @@
     "dev:lan": "concurrently -k -n api,web -c cyan,green \"HOST=0.0.0.0 node server/index.js\" \"vite --host 0.0.0.0\"",
     "build": "tsc -b && vite build",
     "preview": "NODE_ENV=production node server/index.js",
+    "reset": "node scripts/seed-fixtures.mjs",
     "seed": "node scripts/seed-fixtures.mjs",
     "test": "node --test tests/*.test.mjs"
   },

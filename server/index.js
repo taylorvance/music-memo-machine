@@ -10,6 +10,7 @@ const libraryRoot = path.resolve(process.env.LIBRARY_DIR || path.join(projectRoo
 const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || "127.0.0.1";
 const trashRetentionDays = Number(process.env.TRASH_RETENTION_DAYS || 14);
+const postTakeBookmarkGraceSeconds = 8;
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -171,7 +172,7 @@ async function moveIfExists(sourcePath, targetPath) {
   await fs.rename(sourcePath, targetPath);
 }
 
-async function trashClipFileArtifacts(clip, restoredBookmarkIds) {
+async function trashClipFileArtifacts(clip) {
   const deletedAt = new Date();
   const trashDir = clipTrashDir(clip.id);
   const manifest = {
@@ -179,8 +180,7 @@ async function trashClipFileArtifacts(clip, restoredBookmarkIds) {
     version: 1,
     deleted_at: deletedAt.toISOString(),
     purge_after: trashPurgeAfter(deletedAt),
-    clip: persistedClipFields(clip),
-    restored_bookmark_ids: restoredBookmarkIds
+    clip: persistedClipFields(clip)
   };
 
   await fs.rm(trashDir, { recursive: true, force: true });
@@ -328,10 +328,17 @@ function sessionStateAfterClipDelete(session) {
     };
   }
 
-  if ((session.bookmarks || []).length > 0) {
+  if ((session.bookmarks || []).some((bookmark) => bookmark.state === "unresolved")) {
     return {
       state: "bookmarked",
       retention_class: "review_pending"
+    };
+  }
+
+  if (hasDurableBookmark(session)) {
+    return {
+      state: "resolved",
+      retention_class: "archival_context"
     };
   }
 
@@ -601,7 +608,10 @@ app.post("/api/sessions/:id/clips", async (req, res, next) => {
     await trimWavFile(sourcePath, targetPath, start, end);
 
     const stat = await fs.stat(targetPath);
-    const capturedIds = new Set(req.body.bookmark_ids || []);
+    const requestedResolvedIds = new Set([
+      ...(Array.isArray(req.body.resolved_bookmark_ids) ? req.body.resolved_bookmark_ids : []),
+      ...(Array.isArray(req.body.bookmark_ids) ? req.body.bookmark_ids : [])
+    ]);
     const clip = {
       id: clipId,
       source_session_id: session.id,
@@ -615,13 +625,30 @@ app.post("/api/sessions/:id/clips", async (req, res, next) => {
       storage_size_bytes: Math.max(stat.size, Math.round((end - start) * 10 * 1024 * 1024))
     };
 
+    const unresolvedBookmarks = (session.bookmarks || []).filter((bookmark) => bookmark.state === "unresolved");
+    const resolvedBookmarkIds = new Set(
+      unresolvedBookmarks
+        .filter((bookmark) => bookmark.timestamp_seconds >= start && bookmark.timestamp_seconds <= end)
+        .map((bookmark) => bookmark.id)
+    );
+    if (resolvedBookmarkIds.size === 0) {
+      const trailingBookmark = unresolvedBookmarks
+        .filter((bookmark) => bookmark.timestamp_seconds > end)
+        .filter((bookmark) => bookmark.timestamp_seconds <= end + postTakeBookmarkGraceSeconds)
+        .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds)[0];
+      if (trailingBookmark) {
+        resolvedBookmarkIds.add(trailingBookmark.id);
+      }
+    }
+    for (const bookmarkId of requestedResolvedIds) {
+      resolvedBookmarkIds.add(bookmarkId);
+    }
+
     session.bookmarks = (session.bookmarks || []).map((bookmark) => {
-      const inRange = bookmark.timestamp_seconds >= start && bookmark.timestamp_seconds <= end;
-      if (inRange || capturedIds.has(bookmark.id)) {
+      if (bookmark.state === "unresolved" && resolvedBookmarkIds.has(bookmark.id)) {
         return {
           ...bookmark,
-          state: "captured",
-          resulting_clip_id: clipId
+          state: "resolved"
         };
       }
       return bookmark;
@@ -679,18 +706,8 @@ app.delete("/api/clips/:id", async (req, res, next) => {
     }
 
     const session = await loadOptionalSession(clip.source_session_id);
-    const restoredBookmarkIds = [];
     if (session) {
       session.clips = (session.clips || []).filter((clipId) => clipId !== clip.id);
-      session.bookmarks = (session.bookmarks || []).map((bookmark) => {
-        if (bookmark.resulting_clip_id !== clip.id) return bookmark;
-        const { resulting_clip_id, ...rest } = bookmark;
-        restoredBookmarkIds.push(bookmark.id);
-        return {
-          ...rest,
-          state: "unresolved"
-        };
-      });
 
       const nextState = sessionStateAfterClipDelete(session);
       session.state = nextState.state;
@@ -702,7 +719,7 @@ app.delete("/api/clips/:id", async (req, res, next) => {
     if (session) {
       await saveSession(session);
     }
-    const trash = await trashClipFileArtifacts(clip, restoredBookmarkIds);
+    const trash = await trashClipFileArtifacts(clip);
 
     res.json({
       session: session ? await loadSession(session.id) : null,
@@ -737,16 +754,7 @@ app.post("/api/trash/clips/:id/restore", async (req, res, next) => {
 
     let session = await loadOptionalSession(clip.source_session_id);
     if (session) {
-      const restoredBookmarkIds = new Set(manifest.restored_bookmark_ids || []);
       session.clips = Array.from(new Set([...(session.clips || []), clip.id]));
-      session.bookmarks = (session.bookmarks || []).map((bookmark) => {
-        if (!restoredBookmarkIds.has(bookmark.id)) return bookmark;
-        return {
-          ...bookmark,
-          state: "captured",
-          resulting_clip_id: clip.id
-        };
-      });
       session.state = "archival_context";
       session.retention_class = "archival_context";
       session.sync_state = session.sync_state === "synced" ? "pending_sync" : session.sync_state;
