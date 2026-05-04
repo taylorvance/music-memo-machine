@@ -197,6 +197,10 @@ Metadata per bookmark should include:
 - resolution state once the bookmark has been reviewed or captured
 
 The session remains the source of truth until useful clips are extracted.
+After extraction, saved clips are first-class music memo assets. A source
+session remains valuable as provenance and surrounding context, but a saved
+clip should remain usable even if its source session is later compressed,
+trashed, synced elsewhere, or permanently unavailable.
 
 ## Review UI
 
@@ -221,6 +225,9 @@ V1 review UI should support:
 - support selecting the full session range when the whole session is worth
   keeping
 - delete or mark source session resolved
+- restore recoverable sessions from trash before their purge date
+- provide an out-of-the-way path to restore removed clips, because temporary
+  retention should be recoverable through the UI and not only through an API
 
 The UI should work from:
 
@@ -260,12 +267,16 @@ Suggested lifecycle states:
 - `deletable`: safe for rotation under retention rules
 
 Space reclamation should prefer graceful degradation before deletion, especially
-for sessions that may contain useful musical context. A possible pressure
-ladder:
+for sessions that may contain useful musical context. Deletion should be
+two-stage wherever possible: remove from the active review library first, move
+recoverable artifacts into trash with a purge date, and only hard-delete after
+the retention window expires.
+
+A possible pressure ladder:
 
 1. keep newest and bookmarked sessions as raw WAV
-2. delete old unbookmarked sessions that have no notes, clips, or explicit keep
-   markers
+2. move old unbookmarked sessions that have no notes, clips, or explicit keep
+   markers into recoverable session trash
 3. convert older unbookmarked sessions to FLAC
 4. convert clipped/bookmarked source sessions to FLAC archival context
 5. offload or sync archival context sessions when online
@@ -284,9 +295,23 @@ Deletion priority:
 
 The device should favor preserving bookmarked and clipped sessions as archival
 context, not treating them as disposable source. Old unbookmarked sessions can
-be cleanup candidates on a reasonable schedule. Saved clips should not be
-deleted automatically while unsynced unless the user explicitly chooses that
-policy.
+be cleanup candidates on a reasonable schedule, but cleanup should move them to
+recoverable trash before permanent purge. Saved clips should not be deleted
+automatically while unsynced unless the user explicitly chooses that policy.
+Active saved clips are durable memo assets, not disposable trim ranges.
+
+Trash behavior:
+
+- sessions get the prominent trash/restore UI because they are large and carry
+  source context
+- removed clips get a lower-prominence restore path because they are durable
+  memo assets but usually less costly to recreate while source context exists
+- trash entries record deletion time and purge time
+- garbage collection permanently removes trash entries only after the retention
+  window expires
+- restoring a clip should not require restoring its source session first; if
+  source context is unavailable, the restored clip should stand alone with its
+  source metadata marked unavailable
 
 The review UI should include storage and lifecycle management, not just playback
 and trimming:
@@ -298,6 +323,7 @@ and trimming:
 - identify compression candidates
 - identify unsynced durable items
 - allow manual archive, compress, sync, keep, dismiss, and delete actions
+- show recoverable trash and purge dates for sessions and removed clips
 - explain why recording is blocked if no safe reclamation path remains
 
 Compression remains open:
@@ -322,6 +348,10 @@ Likely path:
 - a sync service watches for unsynced clips and sessions
 - when online, sync delivers them to the Mac mini or another durable target
 - synced items can be marked safe for local rotation
+
+Saved clips should sync as independent assets. Their source session id and
+source time range are provenance, not a requirement that the original source
+session remain available forever.
 
 Potential sync targets:
 
@@ -731,6 +761,19 @@ library/
   cache/
     waveforms/
       session-2026-05-02-001.json
+  trash/
+    sessions/
+      session-2026-04-11-002/
+        manifest.json
+        session/
+          session.json
+          source.wav
+        waveform.json
+    clips/
+      clip-2026-05-02-001/
+        manifest.json
+        clip-2026-05-02-001.wav
+        clip-2026-05-02-001.json
 ```
 
 Rules:
@@ -740,6 +783,10 @@ Rules:
 - saved clips are copied audio files under `clips/`, not ranges that depend on
   the source session staying raw and local
 - waveform cache files are rebuildable
+- `trash/` contains recoverable sessions and removed clips until their
+  retention window expires
+- trash manifests include enough metadata to restore or explain why restore is
+  limited
 - the prototype may use manually created fixture audio
 
 ### Session metadata
@@ -823,6 +870,15 @@ Saving a clip should:
 3. link the clip id from the source session
 4. move any captured bookmarks to `captured`
 5. mark the source session `archival_context` unless the user dismisses it
+
+Removing a clip should:
+
+1. unlink it from the active source session if that session is available
+2. move the copied clip audio and metadata to clip trash
+3. restore any bookmarks that were marked captured only by that clip
+4. retain enough clip metadata to restore the clip as a standalone memo even if
+   the source session is trashed or unavailable
+5. purge the trashed clip only after the trash retention window
 
 ### Session queue behavior
 

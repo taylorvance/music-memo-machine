@@ -163,6 +163,10 @@ export function createMetadataStore(libraryRoot) {
     await writeClipSidecar(libraryRoot, clip);
   }
 
+  function deleteClipMetadata(clipId) {
+    db.prepare("DELETE FROM clips WHERE id = ?").run(clipId);
+  }
+
   function deleteSessionMetadata(sessionId) {
     db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
   }
@@ -326,6 +330,7 @@ export function createMetadataStore(libraryRoot) {
     loadClipMetadata,
     saveSessionMetadata,
     saveClipMetadata,
+    deleteClipMetadata,
     deleteSessionMetadata
   };
 }

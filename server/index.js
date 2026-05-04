@@ -9,6 +9,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const libraryRoot = path.resolve(process.env.LIBRARY_DIR || path.join(projectRoot, "library"));
 const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || "127.0.0.1";
+const trashRetentionDays = Number(process.env.TRASH_RETENTION_DAYS || 14);
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -19,7 +20,10 @@ const store = createMetadataStore(libraryRoot);
 let metadataReadyPromise = null;
 
 async function ensureMetadataReady() {
-  metadataReadyPromise ||= store.importSidecarLibrary();
+  metadataReadyPromise ||= store.importSidecarLibrary().then(async (result) => {
+    await purgeExpiredTrash();
+    return result;
+  });
   await metadataReadyPromise;
 }
 
@@ -114,6 +118,186 @@ function enrichClip(clip) {
 
 async function saveClip(clip) {
   await store.saveClipMetadata(clip);
+}
+
+function persistedSessionFields(session) {
+  const {
+    audio_url,
+    source_size_bytes,
+    actual_source_size_bytes,
+    waveform,
+    clip_details,
+    ...persisted
+  } = session;
+  return persisted;
+}
+
+function persistedClipFields(clip) {
+  const { audio_url, ...persisted } = clip;
+  return persisted;
+}
+
+function sessionTrashDir(sessionId) {
+  return path.join(libraryRoot, "trash", "sessions", sessionId);
+}
+
+function sessionTrashManifestPath(sessionId) {
+  return path.join(sessionTrashDir(sessionId), "manifest.json");
+}
+
+function clipTrashDir(clipId) {
+  return path.join(libraryRoot, "trash", "clips", clipId);
+}
+
+function clipTrashManifestPath(clipId) {
+  return path.join(clipTrashDir(clipId), "manifest.json");
+}
+
+function trashPurgeAfter(deletedAt) {
+  const retentionMs = Math.max(1, trashRetentionDays) * 24 * 60 * 60 * 1000;
+  return new Date(deletedAt.getTime() + retentionMs).toISOString();
+}
+
+async function moveIfExists(sourcePath, targetPath) {
+  if (!(await pathExists(sourcePath))) return;
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.rm(targetPath, { recursive: true, force: true });
+  await fs.rename(sourcePath, targetPath);
+}
+
+async function trashClipFileArtifacts(clip, restoredBookmarkIds) {
+  const deletedAt = new Date();
+  const trashDir = clipTrashDir(clip.id);
+  const manifest = {
+    kind: "deleted_clip",
+    version: 1,
+    deleted_at: deletedAt.toISOString(),
+    purge_after: trashPurgeAfter(deletedAt),
+    clip: persistedClipFields(clip),
+    restored_bookmark_ids: restoredBookmarkIds
+  };
+
+  await fs.rm(trashDir, { recursive: true, force: true });
+  await fs.mkdir(trashDir, { recursive: true });
+  await moveIfExists(path.join(libraryRoot, "clips", clip.audio_path), path.join(trashDir, clip.audio_path));
+  await moveIfExists(path.join(libraryRoot, "clips", `${clip.id}.json`), path.join(trashDir, `${clip.id}.json`));
+  await writeJson(clipTrashManifestPath(clip.id), manifest);
+  return manifest;
+}
+
+async function trashSessionFileArtifacts(session) {
+  const deletedAt = new Date();
+  const trashDir = sessionTrashDir(session.id);
+  const manifest = {
+    kind: "deleted_session",
+    version: 1,
+    deleted_at: deletedAt.toISOString(),
+    purge_after: trashPurgeAfter(deletedAt),
+    session: persistedSessionFields(session)
+  };
+
+  await fs.rm(trashDir, { recursive: true, force: true });
+  await fs.mkdir(trashDir, { recursive: true });
+  await moveIfExists(path.join(libraryRoot, "sessions", session.id), path.join(trashDir, "session"));
+  await moveIfExists(path.join(libraryRoot, "cache", "waveforms", `${session.id}.json`), path.join(trashDir, "waveform.json"));
+  await writeJson(sessionTrashManifestPath(session.id), manifest);
+  return manifest;
+}
+
+async function loadClipTrashManifest(clipId) {
+  const manifestPath = clipTrashManifestPath(clipId);
+  if (!(await pathExists(manifestPath))) return null;
+  return readJson(manifestPath);
+}
+
+async function loadSessionTrashManifest(sessionId) {
+  const manifestPath = sessionTrashManifestPath(sessionId);
+  if (!(await pathExists(manifestPath))) return null;
+  return readJson(manifestPath);
+}
+
+async function restoreClipFileArtifacts(clip) {
+  const trashDir = clipTrashDir(clip.id);
+  await moveIfExists(path.join(trashDir, clip.audio_path), path.join(libraryRoot, "clips", clip.audio_path));
+  await moveIfExists(path.join(trashDir, `${clip.id}.json`), path.join(libraryRoot, "clips", `${clip.id}.json`));
+}
+
+async function restoreSessionFileArtifacts(sessionId) {
+  const trashDir = sessionTrashDir(sessionId);
+  await moveIfExists(path.join(trashDir, "session"), path.join(libraryRoot, "sessions", sessionId));
+  await moveIfExists(path.join(trashDir, "waveform.json"), path.join(libraryRoot, "cache", "waveforms", `${sessionId}.json`));
+}
+
+async function loadTrashedSessions() {
+  await purgeExpiredTrash();
+  const root = path.join(libraryRoot, "trash", "sessions");
+  if (!(await pathExists(root))) {
+    return [];
+  }
+
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  const trashed = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const manifest = await loadSessionTrashManifest(entry.name).catch(() => null);
+    if (!manifest?.session) continue;
+    trashed.push({
+      id: entry.name,
+      deleted_at: manifest.deleted_at,
+      purge_after: manifest.purge_after,
+      session: manifest.session
+    });
+  }
+
+  return trashed.sort((a, b) => Date.parse(b.deleted_at || "") - Date.parse(a.deleted_at || ""));
+}
+
+async function purgeExpiredTrashKind(kind, loadManifest, trashDirForId, now) {
+  const root = path.join(libraryRoot, "trash", kind);
+  if (!(await pathExists(root))) {
+    return [];
+  }
+
+  const purged = [];
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const manifest = await loadManifest(entry.name).catch(() => null);
+    if (!manifest?.purge_after || Date.parse(manifest.purge_after) > now.getTime()) continue;
+    await fs.rm(trashDirForId(entry.name), { recursive: true, force: true });
+    purged.push(entry.name);
+  }
+
+  return purged;
+}
+
+async function purgeExpiredTrash(now = new Date()) {
+  const [sessions, clips] = await Promise.all([
+    purgeExpiredTrashKind("sessions", loadSessionTrashManifest, sessionTrashDir, now),
+    purgeExpiredTrashKind("clips", loadClipTrashManifest, clipTrashDir, now)
+  ]);
+  return { sessions, clips };
+}
+
+function sessionStateAfterClipDelete(session) {
+  if ((session.clips || []).length > 0) {
+    return {
+      state: "archival_context",
+      retention_class: "archival_context"
+    };
+  }
+
+  if ((session.bookmarks || []).length > 0) {
+    return {
+      state: "bookmarked",
+      retention_class: "review_pending"
+    };
+  }
+
+  return {
+    state: "unreviewed",
+    retention_class: "throwaway"
+  };
 }
 
 async function loadStorageSim() {
@@ -232,6 +416,7 @@ function summarizeStorage(sessions, clips, sim) {
     cache_bytes: cacheBytes,
     safe_delete_bytes: safeDeleteBytes,
     compression_candidate_bytes: compressionBytes,
+    trash_retention_days: Math.max(1, trashRetentionDays),
     unsynced_durable_count: unsyncedClips + unsyncedSessions,
     recording_blocked: recordingBlocked,
     deficit_bytes: deficitBytes,
@@ -431,8 +616,72 @@ app.patch("/api/clips/:id", async (req, res, next) => {
   }
 });
 
+app.delete("/api/clips/:id", async (req, res, next) => {
+  try {
+    const clip = await loadClip(req.params.id);
+    if (!clip) {
+      res.status(404).json({ error: "Clip not found" });
+      return;
+    }
+
+    const session = await loadSession(clip.source_session_id);
+    session.clips = (session.clips || []).filter((clipId) => clipId !== clip.id);
+    const restoredBookmarkIds = [];
+    session.bookmarks = (session.bookmarks || []).map((bookmark) => {
+      if (bookmark.resulting_clip_id !== clip.id) return bookmark;
+      const { resulting_clip_id, ...rest } = bookmark;
+      restoredBookmarkIds.push(bookmark.id);
+      return {
+        ...rest,
+        state: "unresolved"
+      };
+    });
+
+    const nextState = sessionStateAfterClipDelete(session);
+    session.state = nextState.state;
+    session.retention_class = nextState.retention_class;
+    session.sync_state = session.sync_state === "synced" ? "pending_sync" : session.sync_state;
+
+    store.deleteClipMetadata(clip.id);
+    await saveSession(session);
+    const trash = await trashClipFileArtifacts(clip, restoredBookmarkIds);
+
+    res.json({ session: await loadSession(session.id), deleted_clip_id: clip.id, purge_after: trash.purge_after });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/trash/sessions", async (_req, res, next) => {
+  try {
+    res.json(await loadTrashedSessions());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/trash/sessions/:id/restore", async (req, res, next) => {
+  try {
+    await ensureMetadataReady();
+    const manifest = await loadSessionTrashManifest(req.params.id);
+    if (!manifest?.session) {
+      res.status(404).json({ error: "Trashed session not found" });
+      return;
+    }
+
+    await restoreSessionFileArtifacts(req.params.id);
+    await saveSession(manifest.session);
+    await fs.rm(sessionTrashDir(req.params.id), { recursive: true, force: true });
+
+    res.json({ session: await loadSession(req.params.id), restored_session_id: req.params.id });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/storage", async (_req, res, next) => {
   try {
+    await purgeExpiredTrash();
     const [sessions, clips, sim] = await Promise.all([loadSessions(), loadClips(), loadStorageSim()]);
     res.json(summarizeStorage(sessions, clips, sim));
   } catch (error) {
@@ -459,18 +708,25 @@ app.patch("/api/storage", async (req, res, next) => {
 
 app.post("/api/storage/delete-safe", async (_req, res, next) => {
   try {
+    await purgeExpiredTrash();
     const [sessions, clips, sim] = await Promise.all([loadSessions(), loadClips(), loadStorageSim()]);
     const summary = summarizeStorage(sessions, clips, sim);
     const safeIds = summary.candidates.filter((candidate) => candidate.safe_delete).map((candidate) => candidate.id);
+    const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+    const trashed = [];
 
     for (const id of safeIds) {
-      await fs.rm(path.join(libraryRoot, "sessions", id), { recursive: true, force: true });
-      await fs.rm(path.join(libraryRoot, "cache", "waveforms", `${id}.json`), { force: true });
+      const session = sessionsById.get(id);
+      if (!session) continue;
+      const trash = await trashSessionFileArtifacts(session);
       store.deleteSessionMetadata(id);
+      trashed.push({ id, purge_after: trash.purge_after });
     }
 
     res.json({
       deleted_session_ids: safeIds,
+      trashed_session_ids: trashed.map((session) => session.id),
+      trashed_sessions: trashed,
       storage: summarizeStorage(await loadSessions(), await loadClips(), sim)
     });
   } catch (error) {

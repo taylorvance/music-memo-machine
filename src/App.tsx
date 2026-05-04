@@ -1,9 +1,13 @@
 import {
+  ArchiveRestore,
   Bookmark,
   Check,
+  Crosshair,
+  FastForward,
   Pause,
   Play,
   RefreshCw,
+  Rewind,
   Save,
   Scissors,
   SkipBack,
@@ -11,16 +15,45 @@ import {
   Trash2
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchSessions, saveClip, updateSession } from "./api";
-import type { Session } from "./types";
+import { deleteClip, fetchSessions, fetchTrashedSessions, restoreSession, saveClip, updateSession } from "./api";
+import type { Session, TrashedSession } from "./types";
 
 type Range = {
   start: number;
   end: number;
 };
 
+type RangeDragTarget = "select" | "start" | "end" | "move";
+
+type RangeDragState = {
+  target: RangeDragTarget;
+  pointerId: number;
+  anchorTime: number;
+  anchorClientX: number;
+  initialRange: Range;
+  initialOffset: number;
+  rectWidth: number;
+};
+
+const MIN_RANGE_SECONDS = 0.1;
+const SELECT_DRAG_THRESHOLD_SECONDS = 0.2;
+const PRECISION_DRAG_SCALE = 0.25;
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function roundSeconds(seconds: number) {
+  return Number(seconds.toFixed(2));
+}
+
+function inputSeconds(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatRangeInput(seconds: number) {
+  return Math.round(seconds * 100) % 10 === 0 ? seconds.toFixed(1) : seconds.toFixed(2);
 }
 
 function formatDuration(seconds: number) {
@@ -74,6 +107,7 @@ function fakePeaks(duration: number) {
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [trashedSessions, setTrashedSessions] = useState<TrashedSession[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -89,8 +123,9 @@ export default function App() {
   const selectedSession = sortedSessions.find((session) => session.id === selectedId) || sortedSessions[0];
 
   const reload = useCallback(async (preferredId?: string) => {
-    const next = await fetchSessions();
+    const [next, nextTrash] = await Promise.all([fetchSessions(), fetchTrashedSessions()]);
     setSessions(next);
+    setTrashedSessions(nextTrash);
     setSelectedId((current) => {
       const desired = preferredId || current;
       if (desired && next.some((session) => session.id === desired)) {
@@ -114,6 +149,11 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function restoreTrashedSession(id: string) {
+    const restored = await restoreSession(id);
+    await reload(restored.session.id);
   }
 
   return (
@@ -153,6 +193,29 @@ export default function App() {
               </button>
             ))}
           </div>
+          {trashedSessions.length > 0 ? (
+            <div className="trash-section" aria-label="Recoverable sessions">
+              <div className="trash-header">
+                <h2>Trash</h2>
+                <span>{trashedSessions.length}</span>
+              </div>
+              <div className="trash-list">
+                {trashedSessions.map((item) => (
+                  <div className="trash-row" key={item.id}>
+                    <div>
+                      <strong>{item.id.replace("session-", "")}</strong>
+                      <span>
+                        {formatDuration(item.session.duration_seconds)} · purges {formatDate(item.purge_after)}
+                      </span>
+                    </div>
+                    <button className="icon-button" type="button" onClick={() => run(() => restoreTrashedSession(item.id))} disabled={busy} title="Restore session">
+                      <ArchiveRestore size={17} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </aside>
 
         <section className="review">
@@ -192,6 +255,7 @@ function ReviewSession({
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [range, setRange] = useState<Range>(() => defaultRange(session));
+  const [precisionMode, setPrecisionMode] = useState(false);
   const [notes, setNotes] = useState(session.notes || "");
   const [clipTitle, setClipTitle] = useState("");
 
@@ -239,6 +303,10 @@ function ReviewSession({
     }
   }
 
+  function jumpSeconds(seconds: number) {
+    seek(currentTime + seconds);
+  }
+
   async function saveSelectedClip() {
     await saveClip(session.id, {
       source_start_seconds: range.start,
@@ -250,6 +318,12 @@ function ReviewSession({
         .map((bookmark) => bookmark.id)
     });
     await onReload();
+  }
+
+  async function deleteSavedClip(clipId: string) {
+    if (!window.confirm("Delete this saved clip?")) return;
+    const result = await deleteClip(clipId);
+    onSessionUpdated(result.session);
   }
 
   async function patchSession(patch: Parameters<typeof updateSession>[1]) {
@@ -279,14 +353,37 @@ function ReviewSession({
         <span className="state-pill">{session.state.replace("_", " ")}</span>
       </div>
 
-      <Waveform session={session} currentTime={currentTime} range={range} onSeek={seek} onRangeChange={setRange} />
+      <Waveform
+        session={session}
+        currentTime={currentTime}
+        range={range}
+        precisionMode={precisionMode}
+        onSeek={seek}
+        onRangeChange={setRange}
+        onPrecisionModeChange={setPrecisionMode}
+      />
 
       <div className="transport">
         <button className="icon-button" type="button" onClick={() => jumpBookmark("previous")} disabled={session.bookmarks.length === 0} title="Previous bookmark">
           <SkipBack size={18} />
         </button>
+        <button className="jump-button" type="button" onClick={() => jumpSeconds(-5)} disabled={currentTime <= 0} title="Back 5 seconds" aria-label="Back 5 seconds">
+          <Rewind size={17} />
+          <span>5s</span>
+        </button>
         <button className="play-button" type="button" onClick={() => onRun(togglePlayback)} title={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+        </button>
+        <button
+          className="jump-button"
+          type="button"
+          onClick={() => jumpSeconds(5)}
+          disabled={currentTime >= session.duration_seconds}
+          title="Forward 5 seconds"
+          aria-label="Forward 5 seconds"
+        >
+          <FastForward size={17} />
+          <span>5s</span>
         </button>
         <button className="icon-button" type="button" onClick={() => jumpBookmark("next")} disabled={session.bookmarks.length === 0} title="Next bookmark">
           <SkipForward size={18} />
@@ -322,9 +419,14 @@ function ReviewSession({
               type="number"
               min={0}
               max={session.duration_seconds}
-              step={0.1}
-              value={range.start.toFixed(1)}
-              onChange={(event) => setRange((current) => ({ ...current, start: clamp(Number(event.target.value), 0, current.end - 0.1) }))}
+              step={precisionMode ? 0.05 : 0.1}
+              value={formatRangeInput(range.start)}
+              onChange={(event) =>
+                setRange((current) => ({
+                  ...current,
+                  start: clamp(inputSeconds(event.target.value, current.start), 0, current.end - MIN_RANGE_SECONDS)
+                }))
+              }
             />
           </label>
           <label>
@@ -333,9 +435,14 @@ function ReviewSession({
               type="number"
               min={0}
               max={session.duration_seconds}
-              step={0.1}
-              value={range.end.toFixed(1)}
-              onChange={(event) => setRange((current) => ({ ...current, end: clamp(Number(event.target.value), current.start + 0.1, session.duration_seconds) }))}
+              step={precisionMode ? 0.05 : 0.1}
+              value={formatRangeInput(range.end)}
+              onChange={(event) =>
+                setRange((current) => ({
+                  ...current,
+                  end: clamp(inputSeconds(event.target.value, current.end), current.start + MIN_RANGE_SECONDS, session.duration_seconds)
+                }))
+              }
             />
           </label>
           <button className="secondary-button" type="button" onClick={() => setRange({ start: 0, end: session.duration_seconds })}>
@@ -371,6 +478,9 @@ function ReviewSession({
                   {formatDuration(clip.source_start_seconds)}-{formatDuration(clip.source_end_seconds)}
                 </span>
                 <audio controls src={clip.audio_url} />
+                <button className="icon-button clip-delete-button" type="button" onClick={() => onRun(() => deleteSavedClip(clip.id))} disabled={busy} title="Delete clip">
+                  <Trash2 size={16} />
+                </button>
               </div>
             ))}
           </div>
@@ -412,51 +522,177 @@ function Waveform({
   session,
   currentTime,
   range,
+  precisionMode,
   onSeek,
-  onRangeChange
+  onRangeChange,
+  onPrecisionModeChange
 }: {
   session: Session;
   currentTime: number;
   range: Range;
+  precisionMode: boolean;
   onSeek: (time: number) => void;
   onRangeChange: (range: Range) => void;
+  onPrecisionModeChange: (enabled: boolean) => void;
 }) {
-  const dragStart = useRef<number | null>(null);
+  const waveformRef = useRef<HTMLDivElement | null>(null);
+  const dragState = useRef<RangeDragState | null>(null);
   const peaks = session.waveform?.peaks?.length ? session.waveform.peaks : fakePeaks(session.duration_seconds);
 
-  function timeFromPointer(event: React.PointerEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return clamp(((event.clientX - rect.left) / rect.width) * session.duration_seconds, 0, session.duration_seconds);
+  function waveformRect() {
+    return waveformRef.current?.getBoundingClientRect() || null;
+  }
+
+  function timeFromClientX(clientX: number) {
+    const rect = waveformRect();
+    if (!rect || rect.width <= 0) return 0;
+    return clamp(((clientX - rect.left) / rect.width) * session.duration_seconds, 0, session.duration_seconds);
+  }
+
+  function startDrag(event: React.PointerEvent<HTMLElement>, target: RangeDragTarget) {
+    if (event.button !== 0) return;
+    const rect = waveformRect();
+    if (!rect || rect.width <= 0) return;
+    const anchorTime = timeFromClientX(event.clientX);
+    const initialOffset = clamp(anchorTime - range.start, 0, range.end - range.start);
+
+    dragState.current = {
+      target,
+      pointerId: event.pointerId,
+      anchorTime,
+      anchorClientX: event.clientX,
+      initialRange: range,
+      initialOffset,
+      rectWidth: rect.width
+    };
+
+    onSeek(target === "start" ? range.start : target === "end" ? range.end : anchorTime);
+    waveformRef.current?.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function rangeFromDrag(event: React.PointerEvent<HTMLDivElement>, state: RangeDragState) {
+    if (state.target === "select") {
+      const time = timeFromClientX(event.clientX);
+      return {
+        start: roundSeconds(Math.min(state.anchorTime, time)),
+        end: roundSeconds(Math.max(state.anchorTime, time))
+      };
+    }
+
+    const dragScale = precisionMode ? PRECISION_DRAG_SCALE : 1;
+    const deltaSeconds = ((event.clientX - state.anchorClientX) / state.rectWidth) * session.duration_seconds * dragScale;
+
+    if (state.target === "start") {
+      return {
+        start: roundSeconds(clamp(state.initialRange.start + deltaSeconds, 0, state.initialRange.end - MIN_RANGE_SECONDS)),
+        end: state.initialRange.end
+      };
+    }
+
+    if (state.target === "end") {
+      return {
+        start: state.initialRange.start,
+        end: roundSeconds(clamp(state.initialRange.end + deltaSeconds, state.initialRange.start + MIN_RANGE_SECONDS, session.duration_seconds))
+      };
+    }
+
+    const length = state.initialRange.end - state.initialRange.start;
+    const start = roundSeconds(clamp(state.initialRange.start + deltaSeconds, 0, session.duration_seconds - length));
+    return {
+      start,
+      end: roundSeconds(start + length)
+    };
+  }
+
+  function seekRangeFocus(nextRange: Range, state: RangeDragState, pointerTime: number) {
+    if (state.target === "start") {
+      onSeek(nextRange.start);
+      return;
+    }
+    if (state.target === "end") {
+      onSeek(nextRange.end);
+      return;
+    }
+    if (state.target === "move") {
+      onSeek(clamp(nextRange.start + state.initialOffset, nextRange.start, nextRange.end));
+      return;
+    }
+    onSeek(pointerTime);
   }
 
   function pointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    const time = timeFromPointer(event);
-    dragStart.current = time;
-    onSeek(time);
-    event.currentTarget.setPointerCapture(event.pointerId);
+    startDrag(event, "select");
   }
 
   function pointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragStart.current === null) return;
-    const time = timeFromPointer(event);
-    if (Math.abs(time - dragStart.current) < 0.2) return;
-    onRangeChange({
-      start: Math.min(dragStart.current, time),
-      end: Math.max(dragStart.current, time)
-    });
+    const state = dragState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const pointerTime = timeFromClientX(event.clientX);
+    if (state.target === "select" && Math.abs(pointerTime - state.anchorTime) < SELECT_DRAG_THRESHOLD_SECONDS) return;
+    const nextRange = rangeFromDrag(event, state);
+    onRangeChange(nextRange);
+    seekRangeFocus(nextRange, state, pointerTime);
   }
 
-  function pointerUp(event: React.PointerEvent<HTMLDivElement>) {
-    if (dragStart.current !== null) {
-      onSeek(timeFromPointer(event));
+  function endDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const state = dragState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const pointerTime = timeFromClientX(event.clientX);
+    const nextRange = rangeFromDrag(event, state);
+    if (state.target !== "select" || Math.abs(pointerTime - state.anchorTime) >= SELECT_DRAG_THRESHOLD_SECONDS) {
+      onRangeChange(nextRange);
     }
-    dragStart.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    seekRangeFocus(nextRange, state, pointerTime);
+    if (waveformRef.current?.hasPointerCapture(event.pointerId)) {
+      waveformRef.current.releasePointerCapture(event.pointerId);
+    }
+    dragState.current = null;
   }
+
+  function cancelDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (waveformRef.current?.hasPointerCapture(event.pointerId)) {
+      waveformRef.current.releasePointerCapture(event.pointerId);
+    }
+    dragState.current = null;
+  }
+
+  function nudgeRange(target: "start" | "end", direction: -1 | 1) {
+    const step = precisionMode ? 0.05 : 0.5;
+    const delta = direction * step;
+    if (target === "start") {
+      const start = roundSeconds(clamp(range.start + delta, 0, range.end - MIN_RANGE_SECONDS));
+      onRangeChange({ ...range, start });
+      onSeek(start);
+      return;
+    }
+    if (target === "end") {
+      const end = roundSeconds(clamp(range.end + delta, range.start + MIN_RANGE_SECONDS, session.duration_seconds));
+      onRangeChange({ ...range, end });
+      onSeek(end);
+    }
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLElement>, target: "start" | "end") {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    nudgeRange(target, event.key === "ArrowLeft" ? -1 : 1);
+  }
+
+  const selectionLeft = (range.start / session.duration_seconds) * 100;
+  const selectionWidth = ((range.end - range.start) / session.duration_seconds) * 100;
 
   return (
     <div className="waveform-wrap">
-      <div className="waveform" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
+      <div
+        ref={waveformRef}
+        className="waveform"
+        onPointerDown={pointerDown}
+        onPointerMove={pointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={cancelDrag}
+      >
         <div className="bars" aria-hidden="true">
           {peaks.map((peak, index) => (
             <span key={`${session.id}-${index}`} style={{ height: `${Math.max(6, peak * 100)}%` }} />
@@ -465,10 +701,29 @@ function Waveform({
         <div
           className="selection"
           style={{
-            left: `${(range.start / session.duration_seconds) * 100}%`,
-            width: `${((range.end - range.start) / session.duration_seconds) * 100}%`
+            left: `${selectionLeft}%`,
+            width: `${selectionWidth}%`
           }}
-        />
+          onPointerDown={(event) => startDrag(event, "move")}
+          title="Move selected range"
+        >
+          <button
+            className="selection-handle start"
+            type="button"
+            aria-label="Adjust clip start"
+            title="Adjust clip start"
+            onPointerDown={(event) => startDrag(event, "start")}
+            onKeyDown={(event) => handleKeyDown(event, "start")}
+          />
+          <button
+            className="selection-handle end"
+            type="button"
+            aria-label="Adjust clip end"
+            title="Adjust clip end"
+            onPointerDown={(event) => startDrag(event, "end")}
+            onKeyDown={(event) => handleKeyDown(event, "end")}
+          />
+        </div>
         <div className="playhead" style={{ left: `${(currentTime / session.duration_seconds) * 100}%` }} />
         {session.bookmarks.map((bookmark) => (
           <button
@@ -476,6 +731,7 @@ function Waveform({
             className={cx("marker", bookmark.state !== "unresolved" && "muted")}
             type="button"
             style={{ left: `${(bookmark.timestamp_seconds / session.duration_seconds) * 100}%` }}
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onSeek(bookmark.timestamp_seconds);
@@ -487,10 +743,20 @@ function Waveform({
         ))}
       </div>
       <div className="waveform-scale">
-        <span>Drag to select a range.</span>
         <span>
           {formatDuration(range.start)}-{formatDuration(range.end)}
         </span>
+        <button
+          className={cx("fine-button", precisionMode && "active")}
+          type="button"
+          onClick={() => onPrecisionModeChange(!precisionMode)}
+          aria-pressed={precisionMode}
+          aria-label="Fine adjustment"
+          title={precisionMode ? "Fine adjustment on" : "Fine adjustment"}
+        >
+          <Crosshair size={15} />
+          <span>Fine</span>
+        </button>
       </div>
     </div>
   );

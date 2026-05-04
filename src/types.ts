@@ -80,6 +80,7 @@ export interface StorageSummary {
   cache_bytes: number;
   safe_delete_bytes: number;
   compression_candidate_bytes: number;
+  trash_retention_days: number;
   unsynced_durable_count: number;
   recording_blocked: boolean;
   deficit_bytes: number;
@@ -93,6 +94,13 @@ export interface StorageSummary {
       source_size_bytes: number;
     }
   >;
+}
+
+export interface TrashedSession {
+  id: string;
+  deleted_at: string;
+  purge_after: string;
+  session: Omit<Session, "audio_url" | "source_size_bytes" | "actual_source_size_bytes" | "clip_details" | "waveform">;
 }
 
 export type QueueFilter =

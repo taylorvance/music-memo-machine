@@ -1,4 +1,4 @@
-import type { Clip, CompressionState, RetentionClass, Session, SessionState, StorageSummary, SyncState } from "./types";
+import type { Clip, CompressionState, RetentionClass, Session, SessionState, StorageSummary, SyncState, TrashedSession } from "./types";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -23,6 +23,10 @@ export function fetchSessions() {
 
 export function fetchStorage() {
   return request<StorageSummary>("/api/storage");
+}
+
+export function fetchTrashedSessions() {
+  return request<TrashedSession[]>("/api/trash/sessions");
 }
 
 export function updateSession(
@@ -63,6 +67,18 @@ export function updateClip(id: string, patch: Partial<Pick<Clip, "title" | "note
   });
 }
 
+export function deleteClip(id: string) {
+  return request<{ session: Session; deleted_clip_id: string; purge_after: string }>(`/api/clips/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function restoreSession(id: string) {
+  return request<{ session: Session; restored_session_id: string }>(`/api/trash/sessions/${id}/restore`, {
+    method: "POST"
+  });
+}
+
 export function updateStorage(freeBytes: number) {
   return request<StorageSummary>("/api/storage", {
     method: "PATCH",
@@ -71,7 +87,12 @@ export function updateStorage(freeBytes: number) {
 }
 
 export function deleteSafeSessions() {
-  return request<{ deleted_session_ids: string[]; storage: StorageSummary }>("/api/storage/delete-safe", {
+  return request<{
+    deleted_session_ids: string[];
+    trashed_session_ids: string[];
+    trashed_sessions: Array<{ id: string; purge_after: string }>;
+    storage: StorageSummary;
+  }>("/api/storage/delete-safe", {
     method: "POST"
   });
 }
