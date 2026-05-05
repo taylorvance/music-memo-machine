@@ -16,9 +16,10 @@ The management/review prototype exists:
 
 - Fixture-backed sessions and clips.
 - Review UI with waveform, bookmarks, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
+- Browser recorder emulator with microphone capture, record/stop/bookmark controls, a virtual status light, WAV encoding, and manager sync.
 - Express API with SQLite metadata plus sidecar JSON files.
 - Manager ingestion endpoint for complete recorder/emulator WAV session imports with idempotent acknowledgement.
-- Minimal CLI recorder emulator that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
+- CLI recorder test harness that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
 - Integration tests for important API behavior.
 - Shared `tv-shared` lint, formatting, TypeScript, and CI verification conventions.
 
@@ -34,10 +35,10 @@ The recorder side does not exist yet. Real capture, GPIO controls, LED state, si
    - Keep tests around metadata persistence, trimming, trash, and storage safety.
 
 2. Use the recorder emulator to harden recorder-to-manager behavior.
-   - Keep the CLI intentionally small so it can be used during normal development.
+   - Keep the web emulator close to the planned hardware flow: record, bookmark, status light, sync, then review.
+   - Keep the CLI harness intentionally small for repeatable sync/idempotency scenarios.
    - Add scenarios only when they clarify the real recorder contract.
-   - Use saved payload replay and `--submit-count 2` to test sync retry and idempotency behavior.
-   - Consider a tiny web UI later if click-based record/bookmark testing becomes useful.
+   - Use saved payload replay and `--submit-count 2` in the CLI harness to test sync retry and idempotency behavior.
 
 3. Define and automate deployment.
    - Add a fresh-device bootstrap script for a Raspberry Pi or similar host.
@@ -70,4 +71,4 @@ The recorder side does not exist yet. Real capture, GPIO controls, LED state, si
 - Audio capture stack for the Pi recorder.
 - Node version target for Pi deployment.
 - How much metadata the recorder owns before manager acknowledgement.
-- Whether the CLI emulator is enough, or whether a tiny web UI is useful before hardware work.
+- Whether the browser emulator should add silence auto-stop before hardware work.

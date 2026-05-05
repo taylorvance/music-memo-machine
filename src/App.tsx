@@ -7,6 +7,7 @@ import {
   FastForward,
   Pause,
   Play,
+  Radio,
   RefreshCw,
   Rewind,
   Save,
@@ -34,6 +35,7 @@ import {
   updateClip,
   updateSession,
 } from './api';
+import { RecorderEmulator } from './RecorderEmulator';
 import type {
   BookmarkState,
   Clip,
@@ -48,6 +50,7 @@ type Range = {
 };
 
 type RangeDragTarget = 'select' | 'start' | 'end' | 'move';
+type AppMode = 'review' | 'emulator';
 type BrowseMode = 'sessions' | 'clips';
 type ReviewStatus = 'needs_review' | 'resolved' | 'dismissed';
 
@@ -64,6 +67,7 @@ type RangeDragState = {
 const MIN_RANGE_SECONDS = 0.1;
 const SELECT_DRAG_THRESHOLD_SECONDS = 0.2;
 const PRECISION_DRAG_SCALE = 0.25;
+const appModeCodec = createStringUnionCodec(['review', 'emulator']);
 const browseModeCodec = createStringUnionCodec(['sessions', 'clips']);
 const stringCodec = createStringCodec();
 
@@ -178,6 +182,10 @@ export default function App() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [trashedSessions, setTrashedSessions] = useState<TrashedSession[]>([]);
   const [trashedClips, setTrashedClips] = useState<TrashedClip[]>([]);
+  const [appMode, setAppMode] = useUrlState<AppMode>('mode', {
+    codec: appModeCodec,
+    defaultValue: 'review',
+  });
   const [browseMode, setBrowseMode] = useUrlState<BrowseMode>('view', {
     codec: browseModeCodec,
     defaultValue: 'sessions',
@@ -279,224 +287,269 @@ export default function App() {
     <main className="app">
       <header className="topbar">
         <div>
-          <p>Fixture review prototype</p>
+          <p>Review and recorder emulator</p>
           <h1>Music Memo Machine</h1>
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          onClick={() => run(() => reload(selectedId))}
-          disabled={busy}
-          title="Refresh"
-        >
-          <RefreshCw size={18} />
-        </button>
+        <div className="topbar-actions">
+          <div className="mode-tabs" role="tablist" aria-label="App mode">
+            <button
+              className={cx(appMode === 'review' && 'active')}
+              type="button"
+              role="tab"
+              aria-selected={appMode === 'review'}
+              onClick={() => setAppMode('review')}
+            >
+              <AudioLines size={17} />
+              Review
+            </button>
+            <button
+              className={cx(appMode === 'emulator' && 'active')}
+              type="button"
+              role="tab"
+              aria-selected={appMode === 'emulator'}
+              onClick={() => setAppMode('emulator')}
+            >
+              <Radio size={17} />
+              Emulator
+            </button>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            onClick={() => run(() => reload(selectedId))}
+            disabled={busy}
+            title="Refresh"
+          >
+            <RefreshCw size={18} />
+          </button>
+        </div>
       </header>
 
       {error ? <div className="error">{error}</div> : null}
 
-      <section className="layout">
-        <aside className="queue" aria-label="Library browser">
-          <div
-            className="browse-tabs"
-            role="tablist"
-            aria-label="Library browser"
-          >
-            <button
-              className={cx(browseMode === 'sessions' && 'active')}
-              type="button"
-              onClick={() => setBrowseMode('sessions')}
-              role="tab"
-              aria-selected={browseMode === 'sessions'}
+      {appMode === 'emulator' ? (
+        <RecorderEmulator
+          onSessionImported={async (sessionId) => {
+            await reload(sessionId);
+            setSelectedId(sessionId);
+            setBrowseMode('sessions');
+          }}
+          onReviewSession={(sessionId) => {
+            setSelectedId(sessionId);
+            setBrowseMode('sessions');
+            setAppMode('review');
+          }}
+        />
+      ) : (
+        <section className="layout">
+          <aside className="queue" aria-label="Library browser">
+            <div
+              className="browse-tabs"
+              role="tablist"
+              aria-label="Library browser"
             >
-              Sessions <span>{sortedSessions.length}</span>
-            </button>
-            <button
-              className={cx(browseMode === 'clips' && 'active')}
-              type="button"
-              onClick={() => setBrowseMode('clips')}
-              role="tab"
-              aria-selected={browseMode === 'clips'}
-            >
-              Clips <span>{sortedClips.length}</span>
-            </button>
-          </div>
-          {browseMode === 'sessions' ? (
-            <div className="session-list" role="tabpanel" aria-label="Sessions">
-              {sortedSessions.map((session) => (
-                <button
-                  key={session.id}
-                  className={cx(
-                    'session-row',
-                    session.id === selectedSession?.id && 'selected',
-                  )}
-                  type="button"
-                  onClick={() => selectSession(session.id)}
-                >
-                  <span className="session-title">
-                    {sessionDisplayTitle(session)}
-                  </span>
-                  <span className="session-meta">
-                    {session.title.trim()
-                      ? `${sessionIndexLabel(session)} · `
-                      : ''}
-                    {formatDate(session.created_at)} ·{' '}
-                    {formatDuration(session.duration_seconds)}
-                  </span>
-                  <span className="session-tags">
-                    {unresolvedBookmarkCount(session) > 0 ? (
-                      <span>
-                        {pluralize(
-                          unresolvedBookmarkCount(session),
-                          'bookmark',
+              <button
+                className={cx(browseMode === 'sessions' && 'active')}
+                type="button"
+                onClick={() => setBrowseMode('sessions')}
+                role="tab"
+                aria-selected={browseMode === 'sessions'}
+              >
+                Sessions <span>{sortedSessions.length}</span>
+              </button>
+              <button
+                className={cx(browseMode === 'clips' && 'active')}
+                type="button"
+                onClick={() => setBrowseMode('clips')}
+                role="tab"
+                aria-selected={browseMode === 'clips'}
+              >
+                Clips <span>{sortedClips.length}</span>
+              </button>
+            </div>
+            {browseMode === 'sessions' ? (
+              <div
+                className="session-list"
+                role="tabpanel"
+                aria-label="Sessions"
+              >
+                {sortedSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    className={cx(
+                      'session-row',
+                      session.id === selectedSession?.id && 'selected',
+                    )}
+                    type="button"
+                    onClick={() => selectSession(session.id)}
+                  >
+                    <span className="session-title">
+                      {sessionDisplayTitle(session)}
+                    </span>
+                    <span className="session-meta">
+                      {session.title.trim()
+                        ? `${sessionIndexLabel(session)} · `
+                        : ''}
+                      {formatDate(session.created_at)} ·{' '}
+                      {formatDuration(session.duration_seconds)}
+                    </span>
+                    <span className="session-tags">
+                      {unresolvedBookmarkCount(session) > 0 ? (
+                        <span>
+                          {pluralize(
+                            unresolvedBookmarkCount(session),
+                            'bookmark',
+                          )}
+                        </span>
+                      ) : null}
+                      {session.clips.length > 0 ? (
+                        <span>{pluralize(session.clips.length, 'clip')}</span>
+                      ) : null}
+                      {session.state === 'resolved' ||
+                      session.state === 'dismissed' ? (
+                        <span>{session.state}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="clip-list" role="tabpanel" aria-label="Clips">
+                {sortedClips.length > 0 ? (
+                  sortedClips.map((clip) => {
+                    const sourceActive = activeSessionIds.has(
+                      clip.source_session_id,
+                    );
+                    return (
+                      <div
+                        className={cx(
+                          'clip-browse-row',
+                          clip.id === focusedClipId && 'selected',
                         )}
-                      </span>
-                    ) : null}
-                    {session.clips.length > 0 ? (
-                      <span>{pluralize(session.clips.length, 'clip')}</span>
-                    ) : null}
-                    {session.state === 'resolved' ||
-                    session.state === 'dismissed' ? (
-                      <span>{session.state}</span>
-                    ) : null}
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="clip-list" role="tabpanel" aria-label="Clips">
-              {sortedClips.length > 0 ? (
-                sortedClips.map((clip) => {
-                  const sourceActive = activeSessionIds.has(
-                    clip.source_session_id,
-                  );
-                  return (
-                    <div
-                      className={cx(
-                        'clip-browse-row',
-                        clip.id === focusedClipId && 'selected',
-                      )}
-                      key={clip.id}
-                    >
-                      <button
-                        className="clip-browse-main"
-                        type="button"
-                        onClick={() => selectClip(clip)}
-                        disabled={!sourceActive}
+                        key={clip.id}
                       >
-                        <strong>{clip.title || clip.id}</strong>
-                        <span>
-                          {formatDuration(clip.source_start_seconds)}-
-                          {formatDuration(clip.source_end_seconds)} ·{' '}
-                          {sourceActive
-                            ? sessionIndexLabel({ id: clip.source_session_id })
-                            : 'source unavailable'}
-                        </span>
-                      </button>
-                      <audio controls src={clip.audio_url} />
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="empty compact">No saved clips.</p>
-              )}
-            </div>
-          )}
-          {trashedSessions.length + trashedClips.length > 0 ? (
-            <details className="trash-section" aria-label="Recoverable items">
-              <summary className="trash-header">
-                <h2>Trash</h2>
-                <span>{trashedSessions.length + trashedClips.length}</span>
-              </summary>
-              {trashedSessions.length > 0 ? (
-                <div className="trash-list">
-                  {trashedSessions.map((item) => (
-                    <div className="trash-row" key={item.id}>
-                      <div>
-                        <strong>
-                          {item.session.title ||
-                            sessionIndexLabel({ id: item.id })}
-                        </strong>
-                        <span>
-                          {formatDuration(item.session.duration_seconds)} ·
-                          purges {formatDate(item.purge_after)}
-                        </span>
-                      </div>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() =>
-                          run(() => restoreTrashedSession(item.id))
-                        }
-                        disabled={busy}
-                        title="Restore session"
-                      >
-                        <ArchiveRestore size={17} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {trashedClips.length > 0 ? (
-                <div className="trash-list removed-clips">
-                  {trashedClips.map((item) => (
-                    <div className="trash-row" key={item.id}>
-                      <div>
-                        <strong>{item.clip.title || item.id}</strong>
-                        <span>
-                          {formatDuration(item.clip.source_start_seconds)}-
-                          {formatDuration(item.clip.source_end_seconds)} ·{' '}
-                          {item.source_state === 'active'
-                            ? 'source active'
-                            : item.source_state === 'trashed'
-                              ? 'source in trash'
+                        <button
+                          className="clip-browse-main"
+                          type="button"
+                          onClick={() => selectClip(clip)}
+                          disabled={!sourceActive}
+                        >
+                          <strong>{clip.title || clip.id}</strong>
+                          <span>
+                            {formatDuration(clip.source_start_seconds)}-
+                            {formatDuration(clip.source_end_seconds)} ·{' '}
+                            {sourceActive
+                              ? sessionIndexLabel({
+                                  id: clip.source_session_id,
+                                })
                               : 'source unavailable'}
-                        </span>
+                          </span>
+                        </button>
+                        <audio controls src={clip.audio_url} />
                       </div>
-                      <button
-                        className="icon-button"
-                        type="button"
-                        onClick={() => run(() => restoreTrashedClip(item.id))}
-                        disabled={busy}
-                        title="Restore clip"
-                      >
-                        <AudioLines size={17} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </details>
-          ) : null}
-        </aside>
+                    );
+                  })
+                ) : (
+                  <p className="empty compact">No saved clips.</p>
+                )}
+              </div>
+            )}
+            {trashedSessions.length + trashedClips.length > 0 ? (
+              <details className="trash-section" aria-label="Recoverable items">
+                <summary className="trash-header">
+                  <h2>Trash</h2>
+                  <span>{trashedSessions.length + trashedClips.length}</span>
+                </summary>
+                {trashedSessions.length > 0 ? (
+                  <div className="trash-list">
+                    {trashedSessions.map((item) => (
+                      <div className="trash-row" key={item.id}>
+                        <div>
+                          <strong>
+                            {item.session.title ||
+                              sessionIndexLabel({ id: item.id })}
+                          </strong>
+                          <span>
+                            {formatDuration(item.session.duration_seconds)} ·
+                            purges {formatDate(item.purge_after)}
+                          </span>
+                        </div>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() =>
+                            run(() => restoreTrashedSession(item.id))
+                          }
+                          disabled={busy}
+                          title="Restore session"
+                        >
+                          <ArchiveRestore size={17} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {trashedClips.length > 0 ? (
+                  <div className="trash-list removed-clips">
+                    {trashedClips.map((item) => (
+                      <div className="trash-row" key={item.id}>
+                        <div>
+                          <strong>{item.clip.title || item.id}</strong>
+                          <span>
+                            {formatDuration(item.clip.source_start_seconds)}-
+                            {formatDuration(item.clip.source_end_seconds)} ·{' '}
+                            {item.source_state === 'active'
+                              ? 'source active'
+                              : item.source_state === 'trashed'
+                                ? 'source in trash'
+                                : 'source unavailable'}
+                          </span>
+                        </div>
+                        <button
+                          className="icon-button"
+                          type="button"
+                          onClick={() => run(() => restoreTrashedClip(item.id))}
+                          disabled={busy}
+                          title="Restore clip"
+                        >
+                          <AudioLines size={17} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </details>
+            ) : null}
+          </aside>
 
-        <section className="review">
-          {selectedSession ? (
-            <ReviewSession
-              session={selectedSession}
-              busy={busy}
-              onRun={run}
-              onReload={() => reload(selectedSession.id)}
-              focusedClip={
-                focusedClip?.source_session_id === selectedSession.id
-                  ? focusedClip
-                  : null
-              }
-              onSessionUpdated={(updated) => {
-                setSessions((current) =>
-                  current.map((session) =>
-                    session.id === updated.id ? updated : session,
-                  ),
-                );
-              }}
-            />
-          ) : (
-            <p className="empty">
-              No sessions found. Run `npm run seed` to create fixtures.
-            </p>
-          )}
+          <section className="review">
+            {selectedSession ? (
+              <ReviewSession
+                session={selectedSession}
+                busy={busy}
+                onRun={run}
+                onReload={() => reload(selectedSession.id)}
+                focusedClip={
+                  focusedClip?.source_session_id === selectedSession.id
+                    ? focusedClip
+                    : null
+                }
+                onSessionUpdated={(updated) => {
+                  setSessions((current) =>
+                    current.map((session) =>
+                      session.id === updated.id ? updated : session,
+                    ),
+                  );
+                }}
+              />
+            ) : (
+              <p className="empty">
+                No sessions found. Run `npm run seed` to create fixtures.
+              </p>
+            )}
+          </section>
         </section>
-      </section>
+      )}
     </main>
   );
 }

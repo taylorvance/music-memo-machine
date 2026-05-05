@@ -2,14 +2,15 @@
 
 Music Memo Machine is a low-friction system for capturing rough music ideas and turning the useful parts into saved memos. The intended product is a small always-available recorder near an instrument, paired with a local web app for review, trimming, storage management, and cleanup.
 
-This repo currently contains the management/review prototype and a minimal recorder emulator. The physical recorder, deployment scripts, and recorder sync lifecycle are still roadmap items.
+This repo currently contains the management/review prototype and a browser-based recorder emulator. The physical recorder, deployment scripts, and recorder sync lifecycle are still roadmap items.
 
 ## Current Status
 
 - React/Vite review UI for sessions, bookmarks, clips, trash, and storage pressure simulation.
+- Browser recorder emulator with microphone capture, record/stop/bookmark controls, a virtual status light, WAV encoding, and manager sync.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
 - Manager-side JSON ingestion endpoint for recorder/emulator session imports.
-- Scriptable recorder emulator for generated WAV sessions, bookmark timing, payload replay, and duplicate-submit testing.
+- CLI recorder test harness for generated WAV sessions, payload replay, and duplicate-submit testing.
 - Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
@@ -55,11 +56,7 @@ Run tests:
 npm test
 ```
 
-Submit a generated recorder-emulator session to a running manager:
-
-```bash
-npm run emulator -- --duration 8 --bookmark 2.5 --bookmark 6:ending
-```
+Open the recorder emulator from the top navigation in the web app. The browser may prompt for microphone access.
 
 Run the full local quality gate:
 
@@ -98,7 +95,7 @@ JSON_BODY_LIMIT=64mb npm run dev
 - `npm run clean`: remove installed dependencies and reproducible build/cache artifacts.
 - `npm run preview`: run the Express server in production mode.
 - `npm run seed` / `npm run reset`: regenerate fixture sessions and clips.
-- `npm run emulator`: generate or replay recorder-emulator sessions through the manager ingestion endpoint.
+- `npm run emulator:cli`: generate or replay recorder payloads through the manager ingestion endpoint.
 
 ## Repo Layout
 

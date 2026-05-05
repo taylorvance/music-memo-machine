@@ -17,10 +17,10 @@ function usage() {
   return `Recorder emulator
 
 Usage:
-  npm run emulator -- --duration 8 --bookmark 2.5 --bookmark 6:ending
-  npm run emulator -- --audio ./take.wav --bookmark 12 --title "Morning idea"
-  npm run emulator -- --dry-run --write-payload library/recorder-spool/demo.json
-  npm run emulator -- --payload library/recorder-spool/demo.json --submit-count 2
+  npm run emulator:cli -- --duration 8 --bookmark 2.5 --bookmark 6:ending
+  npm run emulator:cli -- --audio ./take.wav --bookmark 12 --title "Morning idea"
+  npm run emulator:cli -- --dry-run --write-payload library/recorder-spool/demo.json
+  npm run emulator:cli -- --payload library/recorder-spool/demo.json --submit-count 2
 
 Options:
   --manager-url <url>       Manager base URL. Defaults to MANAGER_URL, RECORDER_MANAGER_URL, or ${defaultManagerUrl}.
@@ -447,11 +447,7 @@ export async function buildPayload(options, now = new Date()) {
     audio: {
       data_base64: audio.toString('base64'),
     },
-    bookmarks: buildBookmarks(
-      options.bookmarks,
-      wavInfo.duration_seconds,
-      now,
-    ),
+    bookmarks: buildBookmarks(options.bookmarks, wavInfo.duration_seconds, now),
   };
 }
 

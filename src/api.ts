@@ -1,6 +1,8 @@
 import type {
   Clip,
   CompressionState,
+  IngestSessionInput,
+  IngestSessionResult,
   RetentionClass,
   Session,
   SessionState,
@@ -29,6 +31,13 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 export function fetchSessions() {
   return request<Session[]>('/api/sessions');
+}
+
+export function ingestSession(input: IngestSessionInput) {
+  return request<IngestSessionResult>('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
 }
 
 export function fetchClips() {

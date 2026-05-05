@@ -81,6 +81,32 @@ export interface Session {
   waveform: WaveformCache | null;
 }
 
+export interface IngestSessionInput {
+  id: string;
+  device_name?: string;
+  created_at: string;
+  title?: string;
+  notes?: string;
+  audio: {
+    data_base64: string;
+  };
+  bookmarks?: Array<{
+    id?: string;
+    timestamp_seconds: number;
+    created_at?: string;
+    state?: BookmarkState;
+    note?: string;
+  }>;
+}
+
+export interface IngestSessionResult {
+  acknowledged: boolean;
+  duplicate: boolean;
+  imported: boolean;
+  session_id: string;
+  session: Session;
+}
+
 export interface StorageCandidate {
   id: string;
   age_days: number;

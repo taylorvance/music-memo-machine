@@ -105,15 +105,17 @@ Expected responsibilities:
 
 ## Recorder Emulator
 
-The emulator exists as `npm run emulator`. It gives the manager app realistic input without flashing a Pi or wiring hardware.
+The browser emulator is available from the web app top navigation. It gives the manager app realistic input without flashing a Pi or wiring hardware.
 
 Current behavior:
 
-- Generate a short WAV file and session metadata.
-- Add timestamped bookmarks.
+- Record from the browser microphone.
+- Use record/stop/bookmark controls and a virtual status light.
+- Encode the captured audio as WAV.
 - Submit that session through `POST /api/ingest/sessions`.
-- Save and replay ingest payloads.
-- Submit the same payload multiple times to exercise duplicate acknowledgement.
+- Jump directly into review after manager acknowledgement.
+
+The CLI harness remains available as `npm run emulator:cli` for saved payload replay and duplicate-submit testing.
 
 See `docs/emulator.md` for usage.
 

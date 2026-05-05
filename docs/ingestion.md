@@ -2,7 +2,7 @@
 
 The first ingestion path is intentionally small and dependency-free so the recorder emulator and future Pi recorder can target the same manager behavior.
 
-The local recorder emulator that targets this endpoint is documented in `docs/emulator.md`.
+The browser recorder emulator and CLI harness that target this endpoint are documented in `docs/emulator.md`.
 
 ## Session Import
 
