@@ -1017,6 +1017,31 @@ function Waveform({
     ? session.waveform.peaks
     : fakePeaks(session.duration_seconds);
 
+  useEffect(() => {
+    if (!selectedBookmarkId) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest('[data-bookmark-controls]')
+      ) {
+        return;
+      }
+
+      onBookmarkDismiss();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [onBookmarkDismiss, selectedBookmarkId]);
+
   function waveformRect() {
     return waveformRef.current?.getBoundingClientRect() || null;
   }
@@ -1335,6 +1360,7 @@ function Waveform({
                   `marker-${bookmarkState}`,
                   bookmark.id === selectedBookmarkId && 'selected',
                 )}
+                data-bookmark-controls
                 type="button"
                 style={{ left: `${left}%` }}
                 onPointerDown={(event) => event.stopPropagation()}
@@ -1350,6 +1376,7 @@ function Waveform({
               {bookmark.id === selectedBookmarkId ? (
                 <div
                   className="bookmark-popover"
+                  data-bookmark-controls
                   style={{ left: `${clamp(left, 8, 92)}%` }}
                   role="toolbar"
                   aria-label={`Bookmark ${formatDuration(bookmark.timestamp_seconds)} state`}
