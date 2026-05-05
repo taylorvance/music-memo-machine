@@ -33,9 +33,11 @@ enough that the device can stay in regular use.
 - Provide a phone/computer review UI with waveform, bookmarks, scrubbing, trim,
   save, and trash actions
 - Turn useful sections into separate saved clips or memos
-- Manage storage with safe deletion, compression, offload, and clear blocking
-  behavior when no responsible space can be reclaimed
-- Leave a clear path to off-device sync, especially to a Mac mini on Tailscale
+- Keep recorder storage safe: preserve unsynced recordings, delete only
+  transferred local copies under pressure, and block clearly when no safe space
+  can be reclaimed
+- Run review and management off the recorder by default, likely on a Mac mini on
+  Tailscale, while leaving room for an all-in-one recorder/reviewer later
 
 ## Non-goals
 
@@ -68,7 +70,9 @@ enough that the device can stay in regular use.
 4. Clicking a bookmark (or next/prev buttons) jumps playback to that timestamp.
 5. Player scrubs, selects a range, and saves that range as a music memo clip.
 6. Once all useful parts are extracted, the session can be marked resolved.
-7. Resolved source sessions become eligible for deletion after lifecycle rules.
+7. The management library keeps source sessions by default as durable context.
+   The recorder's local copy may become eligible for deletion only after the
+   management host durably acknowledges transfer.
 
 ## V1 Hardware Posture
 
@@ -205,8 +209,10 @@ range context instead of storing a bookmark-to-clip id in the bookmark schema.
 The session remains the source of truth until useful clips are extracted.
 After extraction, saved clips are first-class music memo assets. A source
 session remains valuable as provenance and surrounding context, but a saved
-clip should remain usable even if its source session is later compressed,
-trashed, synced elsewhere, or permanently unavailable.
+clip should remain usable even if its source session is later trashed,
+offloaded, synced elsewhere, or permanently unavailable. By default, the
+management library should keep source sessions as durable context rather than
+treating them as disposable trim sources.
 
 ## Review UI
 
@@ -260,63 +266,35 @@ storage lifecycle rules so the phone does not accumulate unmanaged junk audio.
 
 ## Storage Lifecycle
 
-Recordings should live locally first.
+Recordings should live on the recorder first, then be pushed to the management
+host. The current preferred architecture is a thin recorder plus a management
+server, likely on the Mac mini. In that shape, the management app is not
+responsible for policing the user's general computer storage, and the prototype
+does not need compression, lossy degradation, or an elaborate storage pressure
+dashboard.
 
-The device should avoid refusing to record when it can safely reclaim space. If
-storage is low, it should first delete safe throwaway sessions, compress less
-safe sessions, and offload or sync when possible. If no responsible space can be
-reclaimed, blocking recording is better than silently deleting valuable context.
+Recorder-local storage policy should stay small and conservative:
 
-Suggested lifecycle states:
+1. record raw WAV source sessions plus bookmark metadata
+2. queue finished sessions for transfer to the management server
+3. keep all unsynced or unacknowledged sessions on the recorder
+4. after durable acknowledgement from the management server, mark the recorder's
+   local copy safe to delete under pressure
+5. if storage is low and no acknowledged local copies can be removed, block new
+   recording and show a clear device status
 
-- `recording`: active capture
-- `unreviewed`: finished session waiting for review
-- `bookmarked`: session has at least one bookmark
-- `resolved`: useful clips have been extracted or the session was intentionally
-  dismissed
-- `archival_context`: source session is retained because it contains bookmarks
-  or produced clips, so the user can revisit surrounding context or expand a
-  trim later
-- `compressed`: source session has been converted from raw capture to a smaller
-  archival form
-- `synced`: session or clips have been copied off-device
-- `deletable`: safe for rotation under retention rules
+The recorder free-space threshold should be configurable. A reasonable default
+is to reserve enough space for a two-hour WAV recording at the configured
+capture format, plus 512 MB for OS, metadata, logs, and transfer staging, with a
+2 GB minimum reserve. This should cover a long accidental or exploratory
+session without silently risking an unsynced take.
 
-Space reclamation should prefer graceful degradation before deletion, especially
-for sessions that may contain useful musical context. Deletion should be
-two-stage wherever possible: remove from the active review library first, move
-recoverable artifacts into trash with a purge date, and only hard-delete after
-the retention window expires.
+The management library should keep source sessions by default. Source sessions
+are durable context, not disposable inputs for clip creation. The user may trash
+or archive source sessions explicitly, but automatic cleanup in the management
+app should not delete source audio just because clips were created.
 
-A possible pressure ladder:
-
-1. keep newest and bookmarked sessions as raw WAV
-2. move old unbookmarked sessions that have no notes, clips, or explicit keep
-   markers into recoverable session trash
-3. convert older unbookmarked sessions to FLAC
-4. convert clipped/bookmarked source sessions to FLAC archival context
-5. offload or sync archival context sessions when online
-6. convert older low-priority source sessions to a lossy idea-grade format only
-   if the user has allowed that policy
-7. block new recording if all remaining data is protected and no space can be
-   reclaimed responsibly
-
-Deletion priority:
-
-1. old unbookmarked sessions with no notes, bookmarks, clips, or keep marker
-2. dismissed source sessions
-3. resolved unbookmarked source sessions whose clips and metadata are synced
-4. clipped/bookmarked source sessions only by explicit user action or an
-   explicit aggressive-storage policy
-
-The device should favor preserving bookmarked and clipped sessions as archival
-context, not treating them as disposable source. Old unbookmarked sessions can
-be cleanup candidates on a reasonable schedule, but cleanup should move them to
-recoverable trash before permanent purge. Saved clips should not be deleted
-automatically while unsynced unless the user explicitly chooses that policy.
-Active saved clips are durable memo assets, not disposable trim ranges.
-
-Trash behavior:
+Management-library trash behavior:
 
 - sessions get the prominent trash/restore UI because they are large and carry
   source context
@@ -329,29 +307,29 @@ Trash behavior:
   source context is unavailable, the restored clip should stand alone with its
   source metadata marked unavailable
 
-The review UI should include storage and lifecycle management, not just playback
-and trimming:
-
-- show total storage, free space, and projected recording time
-- show how much space is used by source sessions, archival context, clips,
-  waveform caches, and other rebuildable artifacts
-- identify safe deletion candidates
-- identify compression candidates
-- identify unsynced durable items
-- allow manual archive, compress, sync, keep, dismiss, and delete actions
-- show recoverable trash and purge dates for sessions and removed clips
-- explain why recording is blocked if no safe reclamation path remains
-
-Compression remains open:
+Compression was considered for an earlier all-in-one recorder/reviewer shape.
+It should remain a design note, not an MVP requirement:
 
 - raw WAV is simplest and highest quality
-- FLAC may be a good archival format with lossless compression
-- Opus/AAC may be good for small idea-grade clips if storage pressure matters
+- FLAC may be useful later if the management host or an all-in-one recorder
+  becomes storage constrained
+- lossy degradation should not be part of the default workflow
 - generic zip-style compression is unlikely to help much on raw audio compared
   with audio-specific formats
 
-The first prototype can record WAV and defer compression until storage pressure
-is real.
+### Recorder Health
+
+Recorder health is useful even if it is not part of the first management
+prototype. A later manager view should be able to show:
+
+- recorder online/offline status
+- current recording state
+- free recorder storage and estimated remaining recording time
+- unsynced session count and bytes
+- safe-to-delete acknowledged session count and bytes
+- last successful transfer acknowledgement
+- last sync error, if any
+- recording blocked reason, if the recorder cannot safely reclaim space
 
 ## Sync and Long-Term Storage
 
@@ -359,15 +337,30 @@ Long-term storage should not depend on the device forever.
 
 Likely path:
 
-- device records and reviews locally
-- saved clips become "music memos"
-- a sync service watches for unsynced clips and sessions
-- when online, sync delivers them to the Mac mini or another durable target
-- synced items can be marked safe for local rotation
+- recorder captures raw source sessions and bookmark metadata locally
+- when online, the recorder pushes finished session bundles to the management
+  server, likely the Mac mini on Tailscale or the local network
+- the management server validates and durably stores the audio and metadata
+- the management server returns an acknowledgement only after the session can be
+  reconstructed from manager storage
+- the recorder marks that local copy safe for deletion under pressure
+- saved clips become first-class "music memos" inside the management library
 
-Saved clips should sync as independent assets. Their source session id and
-source time range are provenance, not a requirement that the original source
-session remain available forever.
+Saved clips should remain independent assets. Their source session id and source
+time range are provenance, not a requirement that the original source session
+remain available forever. However, source sessions should be retained by default
+on the management host as durable context.
+
+Push from the recorder is preferred over manual import. Manual import should
+exist only as a fallback for development, recovery, or offline transfer. Manager
+polling is not the preferred MVP path.
+
+MVP acknowledgement can stay simple: the recorder uploads a completed session
+bundle, and the management server responds with success only after it has
+validated and stored the audio plus metadata. A `200 OK` or `201 Created`
+response with the manager session id is enough for the first version. The
+recorder should not mark its local copy safe to delete until it receives that
+success response.
 
 Potential sync targets:
 
@@ -384,75 +377,147 @@ or download URLs, and a static web UI. This should remain an option, not a v1
 requirement, until the local capture/review loop proves itself.
 
 V1 does not need to choose the final long-term storage architecture, but the
-metadata model should include sync state so the device can grow into it.
+metadata model should include sync and source-availability state so the device
+can grow into it.
 
 ## Recommended MVP Direction
 
-The MVP should use Track A: a dedicated, headless capture device that also hosts
-the local review web UI. Review happens from a phone or computer browser. Sync
-to a Mac mini, AWS, or another destination should be an off-device backup and
-storage-management path, not a requirement for reviewing a take.
+The current preferred MVP is Track B: a dedicated, headless recorder that pushes
+raw sessions to a management server, likely the Mac mini. Review happens from a
+phone or computer browser pointed at the management server. The recorder should
+not need to host the full review UI, waveform generation, clipping, compression,
+or library-management workflow.
 
-This keeps the main loop self-contained:
+This keeps the capture loop dedicated while moving heavier work to a normal
+computer:
 
 1. press record on the device
 2. play
 3. press bookmark during promising sections
-4. open the device's local web UI from phone or computer
-5. review, trim, save clips, archive context, and manage storage
+4. recorder writes `source.wav` and session/bookmark metadata locally
+5. recorder pushes the finished session to the management server
+6. management server acknowledges durable storage
+7. open the management UI from phone or computer
+8. review, trim, save clips, and keep the source session as context
 
-The Mac mini path remains valuable, but it should not be necessary for the MVP
-to feel useful. If review requires a second always-on machine, the recorder is
-less portable and less self-contained.
+This does mean review depends on the management host being available. That is
+acceptable for the current direction because the Mac mini is the likely first
+host, and keeping review off the recorder greatly simplifies board choice,
+storage policy, and UI/server deployment. The all-in-one recorder/reviewer path
+should remain possible, but it is no longer the default MVP assumption.
 
 ### Target board assumption
 
-Assume a Raspberry Pi 4-class board for the MVP recorder/review host. The target
-should be comfortable running:
+Assume the MVP recorder is a thin capture client. It should be comfortable
+running:
 
 - audio capture
-- a local Vite-built web UI served from the device
-- lightweight API/file operations
-- waveform cache generation
-- compression jobs
-- storage lifecycle checks
-- Tailscale or similar remote access later
+- GPIO button/LED handling
+- local session metadata writes
+- a sync queue that pushes completed sessions to the management server
+- recorder-local storage checks
+- a small health/status endpoint or heartbeat
+- Tailscale or local-network connectivity later
 
 Recommended baseline:
 
-- Raspberry Pi 4 Model B or equivalent
-- 2GB RAM minimum
-- 4GB RAM preferred if buying or choosing from available boards
-- USB storage or a high-quality microSD card sized for raw sessions and clips
+- Raspberry Pi Zero 2 W or Raspberry Pi 4-class board for the recorder
+- prefer Pi 4-class hardware if using a heavier USB audio interface, local
+  buffering, or more complex networking
+- USB storage or a high-quality microSD card sized for raw unsynced sessions
 - wall power
 
-Raspberry Pi Zero 2 W remains interesting but should be treated as a stretch
-target for the full local-review MVP. Its size and low power are attractive, but
-512MB RAM, one USB OTG path, and limited CPU headroom make it a better candidate
-for a thinner capture client after the review/lifecycle workflow is proven.
+The thin-recorder lifecycle is deliberately small: record locally, push audio and
+metadata, mark sessions safe only after durable acknowledgement from the
+management host, delete oldest acknowledged local copies when space is needed,
+and block new recording when no safe local deletion remains.
 
-If the hardware scope is pared back to recording and sync management only, the
-Zero 2 W is a strong small-board option to evaluate. In that shape, the device
-would reliably record WAVs, capture bookmarks, write session metadata, show
-simple physical status, maintain a local sync queue, and keep unsynced audio
-safe. It would not be responsible for local waveform generation, clip trimming,
-compression, or the full review UI.
-
-For that option, the thin-recorder lifecycle would be deliberately small: record
-locally, sync audio and metadata, mark sessions safe only after durable
-acknowledgement from the review host, delete oldest locally synced sessions when
-space is needed, and block new recording when no safe local deletion remains.
-The compression ladder would belong on the Pi 4-class local-review host or the
-Mac mini/cloud review host, not on the Zero 2 W capture appliance.
-
-The original Raspberry Pi Zero W should not be an MVP target for local web
-review. Its single-core CPU and 512MB RAM are too tight for the combined capture,
-review, waveform, compression, and lifecycle-management role.
+The original Raspberry Pi Zero W should not be the preferred MVP target. It may
+be able to perform a thin capture role, but its single-core CPU, 512MB RAM, and
+USB constraints leave little margin.
 
 Raspberry Pi 5 is acceptable if already available or if fast storage/performance
 becomes important, but it is not the baseline. Its power/cooling expectations
-and current pricing make it less attractive for a quiet dedicated appliance
+and current pricing make it less attractive for a quiet dedicated recorder
 unless the extra headroom is needed.
+
+### Hardware plan
+
+Use two hardware passes rather than trying to optimize the enclosure and board
+choice immediately.
+
+#### H0 bench recorder
+
+Goal: prove recording, bookmarks, file integrity, and push sync with the least
+hardware friction.
+
+Recommended parts:
+
+- Raspberry Pi 4 Model B, preferably 2 GB or 4 GB if available
+- official USB-C power supply
+- existing USB microphone or simple USB audio interface
+- high-endurance 64 GB or larger microSD card, or USB storage if already handy
+- two momentary buttons: record/stop and bookmark
+- one prominent red recording LED with resistor
+- simple breadboard or temporary enclosure
+
+Why Pi 4 first:
+
+- normal USB ports make USB microphones and storage easier
+- Ethernet is available for reliable first sync tests
+- CPU/RAM headroom keeps early software debugging separate from board limits
+- the same capture/sync service can later move to a smaller board
+
+H0 acceptance checks:
+
+- boot directly into the recorder service
+- press record to create a raw WAV session
+- press bookmark to append timestamped bookmark metadata during recording
+- press record again to close the session cleanly
+- survive reboot without losing already-finished sessions
+- push completed sessions to the management server and only mark local copies
+  safe after acknowledgement
+- block recording when free space is below the configured reserve and no
+  acknowledged local copies can be deleted
+
+#### H1 appliance recorder
+
+Goal: shrink the recorder once the capture/sync loop works.
+
+Candidate board:
+
+- Raspberry Pi Zero 2 W is the preferred small-board candidate for a thin
+  recorder because it has wireless networking, a 40-pin GPIO footprint, and
+  enough CPU for capture plus sync
+- Raspberry Pi 4 remains the fallback if USB audio, storage, or networking
+  becomes annoying on the Zero 2 W
+
+Audio options:
+
+- easiest reliable path: keep using a USB microphone, with the Zero 2 W's USB
+  OTG port and a known-good power supply
+- compact integrated path: evaluate Raspberry Pi Codec Zero or a similar audio
+  board, especially if its built-in microphone or external electret input is
+  good enough for room-level idea capture
+- quality fallback: use a better external USB microphone and accept the larger
+  physical footprint
+
+Controls and indicators:
+
+- record/stop momentary button
+- bookmark momentary button
+- red recording LED
+- optional later low-storage/sync status LED or terse display
+
+Recorder software posture:
+
+- native systemd service on Raspberry Pi OS Lite
+- ALSA-based capture to WAV
+- metadata writes that are safe across power loss
+- local outbox of completed sessions
+- HTTP push to the management server
+- configurable manager URL and free-space reserve
+- small health endpoint or heartbeat later, after MVP sync works
 
 ### Waveform posture
 
@@ -465,17 +530,17 @@ Recommended approach:
 - use a browser waveform library first, preferably WaveSurfer.js in the
   fixture-audio prototype
 - use region/marker support for bookmark jumps and trim selection
-- generate or cache simple peak-envelope JSON later if long files are slow on
-  the target board
+- generate or cache simple peak-envelope JSON later if long files are slow in
+  the manager UI
 - generate cached waveforms lazily when a session is first opened, or during
-  idle time after a recording ends
+  manager idle time after a session is ingested
 - allow a placeholder/fake waveform in the fixture prototype only if audio
   tooling slows down early UI work
 
-The risk is not that waveforms are conceptually difficult. The risk is small
-device performance on long files, especially if waveform generation blocks the
-UI or capture process. That can be handled with caching, background jobs, and
-possibly a more capable board.
+The risk is not that waveforms are conceptually difficult. With the management
+server likely running on the Mac mini, long-file performance is less concerning
+than it would be on a recorder-hosted UI. It should still be handled with
+caching and background jobs so review stays responsive.
 
 Peaks.js is a reasonable fallback if the UI becomes more annotation-heavy,
 because it is designed around zoomable waveforms, point markers, and segment
@@ -485,11 +550,13 @@ and recording.
 
 ### Runtime packaging
 
-Runtime packaging should stay flexible until the target board and capture stack
-are chosen. The review service can be containerized if that helps development or
-deployment, but containerization is not a product requirement. Low-level capture
-may be simpler as a native service if GPIO, audio devices, or boot-time behavior
-are easier to manage outside a container.
+Runtime packaging should stay flexible until the recorder board and sync stack
+are chosen. The preferred management deployment is a container on the Mac mini,
+with the library mounted as a normal host directory so audio files remain easy
+to inspect and back up. Low-level capture on the recorder should be a native
+service rather than a container unless containerization proves helpful later;
+GPIO, audio devices, and boot-time behavior are simpler to own directly on the
+recorder.
 
 The preferred prototype stack is Vite, React/TSX, and TypeScript. A full-stack
 TypeScript app is preferred for momentum, with a small Python backend kept as an
@@ -497,8 +564,9 @@ option only if audio processing or file operations are much simpler there.
 
 ## Architecture Tracks
 
-There are four plausible product shapes. The spec should keep them separate
-until the tradeoffs are clearer.
+There are four plausible product shapes. Track B is the current preferred MVP
+direction, but the spec should keep the alternatives separate enough that the
+project can change shape later without losing the review workflow.
 
 ### Track A: dedicated capture device hosting local review
 
@@ -524,7 +592,7 @@ Risks:
 
 The device records locally and syncs sessions to the Mac mini when online. The
 Mac mini hosts the review UI and performs heavier work such as waveform
-generation, compression, and clip extraction.
+generation and clip extraction.
 
 This track is a natural fit to evaluate for a Pi Zero 2 W-class recorder. The
 recorder is a durable capture appliance, while the Mac mini or another review
@@ -535,12 +603,15 @@ Advantages:
 - keeps the capture device simple
 - Mac mini has plenty of power and stable Tailscale access
 - easier to build a richer review UI without worrying about small-board limits
+- removes the need for a compression-heavy storage lifecycle in the management
+  app
 
 Risks:
 
 - review depends on sync and availability of the Mac mini
 - offline review from the device is weaker
-- storage lifecycle must be careful when sessions exist in two places
+- sync acknowledgement must be robust because it controls whether the recorder
+  can delete local copies under pressure
 
 ### Track C: iOS app or phone-first capture
 
@@ -550,7 +621,7 @@ Advantages:
 
 - no electronics required
 - built-in battery, mic, screen, storage, and networking
-- easier to iterate on review and lifecycle UI
+- easier to iterate on review and management UI
 
 Risks:
 
@@ -579,25 +650,25 @@ Risks:
 ## Prototype Definition Plan
 
 Before writing production hardware or capture software, the product should prove
-the review and lifecycle workflow with ordinary audio files. The first build
+the review and management workflow with ordinary audio files. The first build
 should have a narrow target, fixture data, concrete metadata, and acceptance
 criteria that can be implemented without making electronics decisions.
 
 ### 1. First prototype target
 
-Build a review/lifecycle prototype using sample audio files and bookmark
+Build a review/management prototype using sample audio files and bookmark
 metadata.
 
 This is the first target because it tests the part most likely to determine
 whether the system stays useful: reviewing, trimming, saving, archiving,
-compressing, offloading, and cleaning up. It also avoids electronics while
-still defining the data contract that future capture hardware or apps must
-produce.
+source-session retention, trash, and organization. It also avoids electronics
+while still defining the data contract that future capture hardware or apps
+must produce and push to the management server.
 
 The prototype should be a web app that can run against fixture files on a Mac or
-development machine first, then later run on the recorder itself if the chosen
-board is capable enough. It should not require the Mac mini, AWS, or a phone app
-to validate the workflow.
+development machine first, then on the Mac mini as the likely management host.
+It should not require AWS, a phone app, or recorder hardware to validate the
+review workflow.
 
 The prototype may be Dockerized for local development so the dev loop does not
 depend on Pi deployment. If so, the fixture/library directory should be mounted
@@ -613,9 +684,10 @@ Out of scope for the first prototype:
 - AWS deployment
 - iOS-specific capture behavior
 
-Other possible later build targets:
+Other later build targets:
 
-- Mac mini-hosted review app fed by manually copied sessions
+- recorder push client that uploads completed sessions to the management server
+- manual import as a development/recovery fallback
 - iOS capture/review app
 - dedicated device capture stub plus minimal review
 
@@ -633,9 +705,9 @@ Fixtures should include:
 - session with several bookmarks
 - session where the good clip is the full recording
 - session with silence gaps
-- low-storage simulation case
+- recorder transfer or health simulation case
 
-These fixtures let the review/lifecycle design be tested without committing to
+These fixtures let the review/management design be tested without committing to
 microphones, buttons, boards, or sync machinery.
 
 ### 3. Specify the review workflow
@@ -654,7 +726,8 @@ Required flow:
 7. add or edit session notes
 8. mark bookmarks resolved or dismissed
 9. mark source session resolved, archived as context, or dismissed
-10. verify the source session's lifecycle status and storage behavior
+10. verify that source sessions are retained by default and that source
+    availability/sync status is visible
 
 Important UI states:
 
@@ -665,48 +738,37 @@ Important UI states:
 - archived context session
 - saved unsynced clip
 - saved synced clip
-- storage pressure warning
-- recording blocked until storage is resolved
+- source session local
+- source session unavailable
+- recorder health warning later, once recorder sync exists
 
-### 4. Specify storage lifecycle behavior
+### 4. Specify recorder sync and source retention behavior
 
-Lifecycle should be deterministic enough that storage anxiety does not return.
+The manager should keep source sessions by default. The recorder should have a
+small deterministic deletion policy so storage anxiety does not return on the
+capture appliance.
 
 The design should define:
 
-- default retention window for unbookmarked sessions
-- minimum free-space target
-- compression thresholds
-- which states are never auto-deleted
-- whether lossy degradation applies to source sessions only, clips only, or both
-- whether automatic bookmark-adjacent clip extraction is allowed under pressure
-- when recording blocks instead of reclaiming more space
-- how the UI explains what is safe to delete
+- when a recorder-local session copy becomes safe to delete
+- how the recorder reports free space, unsynced bytes, and sync errors
+- how the manager represents local, remote, trashed, or unavailable source audio
+- whether manager trash is only explicit user action in MVP
+- how the UI explains source availability without implying source sessions are
+  disposable
 
 Starting policy:
 
-- saved clips are never auto-deleted before sync
-- bookmarked unresolved sessions are preserved as long as possible
-- old unbookmarked source sessions degrade before deletion
-- source sessions that produced clips become archival context by default
-- archived context can be compressed or offloaded before deletion is considered
-- recording may block when only protected clips and archival context remain
-
-Recommended configurable defaults:
-
-- minimum free space target: 2 GB or 15% of storage, whichever is larger
-- unbookmarked throwaway retention: 14 days
-- unbookmarked sessions older than 3 days become compression candidates
-- archival context older than 30 days can be compressed to FLAC
-- lossy degradation is allowed only for unbookmarked throwaway source sessions
-  by default
-- saved clips and protected sessions are never automatically degraded to lossy
-- recording blocks when the minimum free space target cannot be met without
-  touching protected clips or archival context
-
-These are starting defaults, not hard product decisions. They should be easy to
-change in configuration, and the prototype should make the policy visible enough
-to tune after using real recordings.
+- the recorder never deletes unsynced or unacknowledged sessions
+- the management server keeps source sessions by default
+- saved clips are never auto-deleted by the manager
+- manager trash is explicit and recoverable for a retention window
+- acknowledged recorder-local copies may be deleted under pressure
+- recording blocks when the recorder cannot meet its free-space target without
+  deleting unacknowledged sessions
+- the free-space threshold is configurable and defaults to a two-hour recording
+  reserve plus operating margin
+- compression and lossy degradation are out of scope for the preferred MVP
 
 ### 5. Specify sync boundaries
 
@@ -725,15 +787,16 @@ The design should define:
 
 Likely early stance:
 
-- clips and metadata are the durable assets
-- clipped or bookmarked source sessions are archival context by default
-- unbookmarked source sessions are temporary unless explicitly kept
+- recorder push to the management server is the MVP path
+- manual import is a fallback, not the normal workflow
+- manager polling is out of the preferred MVP path
+- source sessions, clips, and metadata are durable assets on the manager
 - waveform caches are rebuildable
 - sync failure should never prevent capture
-- `synced` means the destination has durably acknowledged the item and metadata
-  needed to reconstruct it
-- source sessions, clips, and metadata can sync independently; deletion safety
-  depends on the specific object being acknowledged
+- `synced` means the management server returned success after storing the source
+  audio and metadata needed to reconstruct the session
+- the management server only needs to write acknowledgement and possibly health
+  requests back to the recorder; review edits do not need to sync back in MVP
 
 ### 6. Specify capture interface contracts
 
@@ -748,10 +811,19 @@ Capture output contract:
 - optional session note
 - recording start and stop timestamps when available
 - mic/input metadata when available
+- optional origin recorder id when available
+- transfer manifest or checksum when available
 
 This keeps the future hardware client thin. Its job is to create session audio
-and metadata reliably; the review system owns interpretation, cleanup, and
+and metadata reliably, push them to the management server, and keep local copies
+safe until acknowledgement. The review system owns interpretation, cleanup, and
 long-term organization.
+
+For a single-recorder setup, the origin recorder id can be an internal constant
+or omitted from the UI. It is mainly a future-proof provenance and diagnostics
+field: if more than one recorder ever exists, it explains where a session came
+from, helps diagnose sync/device issues, and avoids assuming every session came
+from the same physical box.
 
 ## Implementation Readiness Criteria
 
@@ -762,19 +834,20 @@ Ready when these are true:
 
 - fixture data shape is specified
 - session/bookmark/clip metadata schema is stable enough for one build
-- lifecycle rules are specific enough to simulate
+- source retention and sync/source availability states are specific enough to
+  simulate
 - first prototype acceptance criteria are written
 
-The first implementation should target review and lifecycle workflow before
+The first implementation should target review and management workflow before
 electronics. If that proves pleasant, the hardware recorder can remain a thin
 capture client.
 
 ## First Prototype Contract
 
-The first prototype is a review and lifecycle tool for fixture audio. It does
+The first prototype is a review and management tool for fixture audio. It does
 not record live audio. It proves that sessions can be reviewed quickly,
-bookmarks can become clips, and storage pressure can be understood without
-touching electronics.
+bookmarks can become clips, source sessions can remain durable context, and
+sync/source availability states can be represented without touching electronics.
 
 ### Fixture layout
 
@@ -836,6 +909,8 @@ Prototype `session.json` shape:
   "audio_path": "source.wav",
   "state": "bookmarked",
   "retention_class": "review_pending",
+  "source_availability": "local",
+  "origin_device_id": "recorder-001",
   "compression_state": "raw_wav",
   "sync_state": "local_only",
   "notes": "",
@@ -866,12 +941,16 @@ Required retention classes:
 - `archival_context`
 - `protected`
 
-Required compression states:
+Current optional compression states:
 
 - `raw_wav`
 - `flac`
 - `lossy`
 - `pending_compression`
+
+Compression state exists in the current prototype metadata because an all-in-one
+recorder/reviewer lifecycle was considered earlier. It should not drive MVP UI
+work while the preferred direction is a Mac mini-hosted management app.
 
 Required sync states:
 
@@ -923,7 +1002,7 @@ Default ordering:
 
 1. bookmarked unresolved sessions, newest first
 2. unreviewed sessions, newest first
-3. storage pressure candidates
+3. sessions with sync/source availability problems
 4. archived context
 5. dismissed or resolved sessions
 
@@ -934,48 +1013,37 @@ Useful filters:
 - has saved clips
 - archived context
 - unbookmarked
-- safe to delete
-- compression candidate
 - sync problem
+- source unavailable
 
-### Storage dashboard behavior
+### Source And Recorder Status Behavior
 
-The prototype should include a storage view, even if values are simulated.
+The management prototype should emphasize source/session status over local
+storage policing. A recorder health view is valuable later, once a real recorder
+sync path exists.
 
 Show:
 
-- total library size
-- free-space simulation value
-- estimated recording time remaining
-- source session size
-- archival context size
-- saved clip size
-- waveform/cache size
-- safe-delete total
-- compression candidate total
-- unsynced durable item count
+- source session availability
+- source session sync/import state
+- origin recorder, when known
+- unsynced or failed-transfer count, when recorder sync exists
+- recorder free space and estimated recording time, later
+- recording blocked reason, later
 
 Actions:
 
-- delete safe throwaway sessions
-- mark a session keep/protected
 - archive a session as context
 - dismiss a session
-- simulate FLAC compression
-- simulate lossy degradation if policy allows it
 - simulate sync success/failure
-
-Blocking rule:
-
-- if simulated free space drops below the minimum target and no safe deletion,
-  compression, or offload candidate remains, show `recording blocked`
+- restore trashed sessions and clips
 
 ### Prototype acceptance criteria
 
 The prototype is successful when it can:
 
 1. load fixture sessions from disk
-2. show a session queue with lifecycle filters
+2. show a session queue with review/source-status filters
 3. render or fake a waveform for each session
 4. show bookmark markers on the waveform
 5. jump to bookmark, previous bookmark, and next bookmark
@@ -984,10 +1052,10 @@ The prototype is successful when it can:
 8. save the selected range as a copied clip with metadata
 9. mark source sessions as resolved, dismissed, or archival context
 10. add and edit session notes
-11. show safe deletion and compression candidates
-12. simulate sync state changes
-13. show when recording would be blocked for storage reasons
-14. keep clipped/bookmarked source sessions available as context
+11. simulate sync/source availability state changes
+12. restore recoverable sessions and removed clips
+13. keep source sessions available as durable context by default
+14. leave recorder health and recording-blocked UI as a later integration point
 
 ## Data Model
 
@@ -1005,7 +1073,9 @@ Recommended fields:
 - sample rate and channel count
 - state
 - retention class: throwaway, review_pending, archival_context, protected
-- compression state
+- source availability: local, remote, trashed, unavailable
+- optional origin recorder id or device name
+- optional compression state only if constrained storage becomes important again
 - optional notes
 - bookmark ids
 - saved clip ids
@@ -1042,7 +1112,8 @@ Recommended fields:
   capture?
 - Should v1 support external USB mic selection, or merely tolerate one fixed
   attached mic?
-- Are the proposed storage defaults right after testing with real fixture audio?
+- Is the default recorder free-space reserve of a two-hour WAV plus operating
+  margin enough after testing with real capture settings?
 - Should AWS serverless become the preferred long-term sync/storage destination,
   or remain one option beside the Mac mini?
 - Should the device expose a normal Wi-Fi client UI, create a local hotspot
