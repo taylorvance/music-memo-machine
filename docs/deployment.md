@@ -7,7 +7,7 @@ The deployment goal is repeatable iteration after a small amount of one-time dev
 - Management app runs on a stable host, likely a Mac mini or Raspberry Pi, reachable over Tailscale or LAN.
 - Recorder app runs on a Raspberry Pi near the instrument.
 - Recorder writes session audio and metadata to a local spool first.
-- Manager ingests sessions and durably acknowledges them.
+- Manager ingests complete session payloads through `POST /api/ingest/sessions` and durably acknowledges them.
 - Recorder deletes local copies only after the manager has acknowledged transfer and storage policy allows it.
 
 ## One-Time Pi Setup
@@ -99,7 +99,7 @@ Expected responsibilities:
 - Own microphone capture.
 - Own GPIO button and LED state.
 - Write complete session artifacts locally before attempting sync.
-- Retry sync safely.
+- Retry `POST /api/ingest/sessions` safely until the manager acknowledges import or an exact duplicate.
 - Track manager acknowledgement.
 - Never delete unsynced or acknowledged-durable material accidentally.
 
@@ -112,7 +112,7 @@ Minimum useful behavior:
 - Start/stop a fake recording.
 - Add bookmarks during the fake recording.
 - Generate a short WAV file and session metadata.
-- Submit or import that session through the same path the real recorder will use.
+- Submit that session through `POST /api/ingest/sessions`.
 - Support repeatable test scenarios for sync failure and duplicate submission.
 
 ## When to Add Heavier Tooling

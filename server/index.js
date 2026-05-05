@@ -15,7 +15,7 @@ const trashRetentionDays = Number(process.env.TRASH_RETENTION_DAYS || 14);
 const postTakeBookmarkGraceSeconds = 8;
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '32mb' }));
 app.use('/media/sessions', express.static(path.join(libraryRoot, 'sessions')));
 app.use('/media/clips', express.static(path.join(libraryRoot, 'clips')));
 
@@ -47,6 +47,10 @@ async function readJson(filePath) {
 async function writeJson(filePath, data) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+function httpError(status, message) {
+  return Object.assign(new Error(message), { status });
 }
 
 async function loadWaveform(sessionId) {
@@ -629,6 +633,216 @@ async function trimWavFile(sourcePath, targetPath, startSeconds, endSeconds) {
   await fs.writeFile(targetPath, Buffer.concat([header, clipData]));
 }
 
+function safeLibraryId(value, label) {
+  if (typeof value !== 'string') {
+    throw httpError(400, `${label} is required`);
+  }
+
+  const id = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(id)) {
+    throw httpError(
+      400,
+      `${label} must use only letters, numbers, dot, underscore, or dash`,
+    );
+  }
+  if (id === '.' || id === '..') {
+    throw httpError(400, `${label} is invalid`);
+  }
+  return id;
+}
+
+function optionalString(value, fallback = '') {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function validDateString(value, label) {
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+    throw httpError(400, `${label} must be a valid date string`);
+  }
+  return value;
+}
+
+function decodeBase64Audio(payload) {
+  const value = payload.audio?.data_base64 ?? payload.audio_base64;
+  if (typeof value !== 'string') {
+    throw httpError(400, 'audio.data_base64 is required');
+  }
+
+  const normalized = value.replace(/\s/g, '');
+  if (
+    normalized.length === 0 ||
+    normalized.length % 4 === 1 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)
+  ) {
+    throw httpError(400, 'audio.data_base64 must be valid base64');
+  }
+
+  return Buffer.from(normalized, 'base64');
+}
+
+function readWavInfo(buffer) {
+  if (
+    buffer.length < 44 ||
+    buffer.toString('ascii', 0, 4) !== 'RIFF' ||
+    buffer.toString('ascii', 8, 12) !== 'WAVE'
+  ) {
+    throw httpError(400, 'Only WAV audio can be imported');
+  }
+
+  const fmt = findWavChunk(buffer, 'fmt ');
+  const data = findWavChunk(buffer, 'data');
+  if (!fmt || !data) {
+    throw httpError(400, 'WAV audio is missing fmt or data chunks');
+  }
+
+  const channelCount = buffer.readUInt16LE(fmt.offset + 2);
+  const sampleRate = buffer.readUInt32LE(fmt.offset + 4);
+  const byteRate = buffer.readUInt32LE(fmt.offset + 8);
+  if (channelCount < 1 || sampleRate < 1 || byteRate < 1 || data.size < 1) {
+    throw httpError(400, 'WAV audio has invalid stream metadata');
+  }
+
+  return {
+    duration_seconds: Number((data.size / byteRate).toFixed(3)),
+    sample_rate: sampleRate,
+    channel_count: channelCount,
+  };
+}
+
+function normalizeImportedBookmarks(bookmarks, durationSeconds) {
+  if (bookmarks === undefined) {
+    return [];
+  }
+  if (!Array.isArray(bookmarks)) {
+    throw httpError(400, 'bookmarks must be an array');
+  }
+
+  const seenIds = new Set();
+  return bookmarks.map((bookmark, index) => {
+    if (!bookmark || typeof bookmark !== 'object') {
+      throw httpError(400, 'bookmarks must contain objects');
+    }
+
+    const timestamp = Number(bookmark.timestamp_seconds);
+    if (
+      !Number.isFinite(timestamp) ||
+      timestamp < 0 ||
+      timestamp > durationSeconds
+    ) {
+      throw httpError(
+        400,
+        'bookmark timestamp_seconds must be within the recording duration',
+      );
+    }
+
+    const state = optionalString(bookmark.state, 'unresolved');
+    if (!['unresolved', 'resolved', 'dismissed', 'captured'].includes(state)) {
+      throw httpError(400, 'bookmark state is invalid');
+    }
+
+    const id = bookmark.id
+      ? safeLibraryId(bookmark.id, 'bookmark id')
+      : `bookmark-${String(index + 1).padStart(3, '0')}`;
+    if (seenIds.has(id)) {
+      throw httpError(400, 'bookmark ids must be unique');
+    }
+    seenIds.add(id);
+
+    return {
+      id,
+      timestamp_seconds: timestamp,
+      created_at:
+        bookmark.created_at === undefined
+          ? undefined
+          : validDateString(bookmark.created_at, 'bookmark created_at'),
+      state,
+      note: optionalString(bookmark.note),
+    };
+  });
+}
+
+async function ingestSession(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw httpError(400, 'A session import payload is required');
+  }
+
+  const sessionId = safeLibraryId(
+    payload.id || payload.session_id || payload.recorder_session_id,
+    'session id',
+  );
+  const createdAt = validDateString(payload.created_at, 'created_at');
+  const audio = decodeBase64Audio(payload);
+  const wavInfo = readWavInfo(audio);
+  const bookmarks = normalizeImportedBookmarks(
+    payload.bookmarks,
+    wavInfo.duration_seconds,
+  );
+
+  const existingSession = store.loadSessionMetadata(sessionId);
+  if (existingSession) {
+    const existingAudioPath = path.join(
+      libraryRoot,
+      'sessions',
+      existingSession.id,
+      existingSession.audio_path,
+    );
+    const existingAudio = await fs.readFile(existingAudioPath);
+    if (!existingAudio.equals(audio)) {
+      throw httpError(409, 'Session id already exists with different audio');
+    }
+    return {
+      acknowledged: true,
+      duplicate: true,
+      imported: false,
+      session_id: sessionId,
+      session: await loadSession(sessionId),
+    };
+  }
+
+  const sessionDir = path.join(libraryRoot, 'sessions', sessionId);
+  if (await pathExists(sessionDir)) {
+    throw httpError(
+      409,
+      'Session artifacts already exist without active metadata',
+    );
+  }
+
+  const hasBookmarks = bookmarks.some(
+    (bookmark) => bookmark.state !== 'dismissed',
+  );
+  const session = {
+    id: sessionId,
+    created_at: createdAt,
+    title: optionalString(payload.title),
+    duration_seconds: wavInfo.duration_seconds,
+    audio_path: 'source.wav',
+    state: hasBookmarks ? 'bookmarked' : 'unreviewed',
+    retention_class: hasBookmarks ? 'review_pending' : 'throwaway',
+    compression_state: 'raw_wav',
+    sync_state: 'synced',
+    notes: optionalString(payload.notes),
+    device_name:
+      typeof payload.device_name === 'string' ? payload.device_name : undefined,
+    sample_rate: wavInfo.sample_rate,
+    channel_count: wavInfo.channel_count,
+    storage_size_bytes: audio.length,
+    bookmarks,
+    clips: [],
+  };
+
+  await fs.mkdir(sessionDir, { recursive: false });
+  await fs.writeFile(path.join(sessionDir, session.audio_path), audio);
+  await saveSession(session);
+
+  return {
+    acknowledged: true,
+    duplicate: false,
+    imported: true,
+    session_id: sessionId,
+    session: await loadSession(sessionId),
+  };
+}
+
 app.get('/api/health', async (_req, res, next) => {
   try {
     await ensureMetadataReady();
@@ -638,6 +852,16 @@ app.get('/api/health', async (_req, res, next) => {
       db_path: store.dbPath,
       seeded: store.hasSessions(),
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/ingest/sessions', async (req, res, next) => {
+  try {
+    await ensureMetadataReady();
+    const result = await ingestSession(req.body);
+    res.status(result.imported ? 201 : 200).json(result);
   } catch (error) {
     next(error);
   }
@@ -1070,8 +1294,11 @@ if (process.env.NODE_ENV === 'production' && (await pathExists(distPath))) {
 }
 
 app.use((error, _req, res, _next) => {
-  console.error(error);
-  res.status(500).json({ error: error.message || 'Server error' });
+  const status = Number.isInteger(error.status) ? error.status : 500;
+  if (status >= 500) {
+    console.error(error);
+  }
+  res.status(status).json({ error: error.message || 'Server error' });
 });
 
 if (process.env.NODE_ENV !== 'test') {

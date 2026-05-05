@@ -17,23 +17,25 @@ The management/review prototype exists:
 - Fixture-backed sessions and clips.
 - Review UI with waveform, bookmarks, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
 - Express API with SQLite metadata plus sidecar JSON files.
+- Manager ingestion endpoint for complete recorder/emulator WAV session imports with idempotent acknowledgement.
 - Integration tests for important API behavior.
 - Shared `tv-shared` lint, formatting, TypeScript, and CI verification conventions.
 
-The recorder side does not exist yet. Real capture, GPIO controls, LED state, silence auto-stop, sync, and deployment automation are still open.
+The recorder side does not exist yet. Real capture, GPIO controls, LED state, silence auto-stop, recorder-side sync retries, post-ack deletion, and deployment automation are still open.
 
 ## Near-Term Priorities
 
 1. Keep the management app useful as the canonical review target.
    - Stabilize the session and clip metadata contract.
    - Make library paths and production startup predictable.
-   - Add import/sync endpoints or a spool watcher once the recorder contract is clear.
+   - Keep the JSON/base64 import endpoint aligned with `docs/ingestion.md`.
+   - Add multipart upload or a spool watcher if longer recordings outgrow JSON import.
    - Keep tests around metadata persistence, trimming, trash, and storage safety.
 
 2. Add a minimal recorder emulator app for testing.
    - Simulate record/stop/bookmark without Pi hardware.
    - Generate short WAV sessions or accept a local audio file.
-   - Write the same session artifacts the recorder will write, or submit them through the same API the recorder will use.
+   - Submit sessions through `POST /api/ingest/sessions`.
    - Exercise bookmark timing, sync retries, idempotency, and manager ingestion.
    - Keep it intentionally small so it can be used during normal development.
 
@@ -63,7 +65,7 @@ The recorder side does not exist yet. Real capture, GPIO controls, LED state, si
 
 ## Open Decisions
 
-- Exact ingestion API shape: file upload, spool directory import, rsync-style sync, or a hybrid.
+- When to replace or supplement JSON/base64 ingestion with multipart upload, spool directory import, rsync-style sync, or a hybrid.
 - Whether the manager runs primarily on a Mac mini, a Pi, or either.
 - Audio capture stack for the Pi recorder.
 - Node version target for Pi deployment.

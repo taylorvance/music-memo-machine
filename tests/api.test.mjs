@@ -77,6 +77,50 @@ async function writeJson(filePath, data) {
   await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+function makeTestWav({
+  durationSeconds = 1,
+  sampleRate = 8000,
+  channelCount = 1,
+  frequency = 440,
+} = {}) {
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const sampleCount = Math.max(1, Math.floor(durationSeconds * sampleRate));
+  const dataSize = sampleCount * blockAlign;
+  const buffer = Buffer.alloc(44 + dataSize);
+
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(channelCount, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(byteRate, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataSize, 40);
+
+  for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+    const t = sampleIndex / sampleRate;
+    const envelope = Math.min(1, t / 0.05, (durationSeconds - t) / 0.05);
+    const value = Math.round(
+      Math.sin(2 * Math.PI * frequency * t) * envelope * 16_000,
+    );
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      buffer.writeInt16LE(
+        value,
+        44 + sampleIndex * blockAlign + channel * bytesPerSample,
+      );
+    }
+  }
+
+  return buffer;
+}
+
 test('health reports the seeded temp library', async () => {
   const { response, body } = await request('/api/health');
 
@@ -160,6 +204,206 @@ test('seeded fixture sessions load with bookmarks, waveforms, and existing clips
     clipped.clip_details[0].audio_url.startsWith('/media/clips/'),
     true,
   );
+});
+
+test('recorder ingestion writes session audio, sidecar, and SQLite metadata', async () => {
+  const wav = makeTestWav({
+    durationSeconds: 1.25,
+    sampleRate: 8000,
+    channelCount: 1,
+  });
+  const payload = {
+    id: 'ingest-test-001',
+    device_name: 'recorder emulator',
+    created_at: '2026-05-05T12:00:00.000Z',
+    title: 'Imported sketch',
+    notes: 'First emulator import',
+    audio: {
+      data_base64: wav.toString('base64'),
+    },
+    bookmarks: [
+      {
+        timestamp_seconds: 0.4,
+        note: 'Opening turn',
+      },
+      {
+        id: 'accent',
+        timestamp_seconds: 0.9,
+        created_at: '2026-05-05T12:00:01.000Z',
+        note: 'Accent lands here',
+      },
+    ],
+  };
+
+  const { response, body } = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  assert.equal(response.status, 201);
+  assert.equal(body.acknowledged, true);
+  assert.equal(body.imported, true);
+  assert.equal(body.duplicate, false);
+  assert.equal(body.session_id, 'ingest-test-001');
+  assert.equal(body.session.id, 'ingest-test-001');
+  assert.equal(body.session.state, 'bookmarked');
+  assert.equal(body.session.retention_class, 'review_pending');
+  assert.equal(body.session.sync_state, 'synced');
+  assert.equal(body.session.duration_seconds, 1.25);
+  assert.equal(body.session.sample_rate, 8000);
+  assert.equal(body.session.channel_count, 1);
+  assert.equal(body.session.source_size_bytes, wav.length);
+  assert.equal(body.session.actual_source_size_bytes, wav.length);
+  assert.equal(
+    body.session.audio_url,
+    '/media/sessions/ingest-test-001/source.wav',
+  );
+  assert.deepEqual(
+    body.session.bookmarks.map((bookmark) => bookmark.id),
+    ['bookmark-001', 'accent'],
+  );
+
+  const audioPath = path.join(
+    libraryRoot,
+    'sessions',
+    'ingest-test-001',
+    'source.wav',
+  );
+  assert.equal((await fs.readFile(audioPath)).equals(wav), true);
+
+  const sessionJson = await readJson(
+    path.join(libraryRoot, 'sessions', 'ingest-test-001', 'session.json'),
+  );
+  assert.equal(sessionJson.id, 'ingest-test-001');
+  assert.equal(sessionJson.audio_path, 'source.wav');
+  assert.equal(sessionJson.storage_size_bytes, wav.length);
+  assert.equal('audio_url' in sessionJson, false);
+
+  const db = new DatabaseSync(path.join(libraryRoot, 'metadata.sqlite'));
+  try {
+    const row = db
+      .prepare(
+        'SELECT title, sync_state, sample_rate, channel_count FROM sessions WHERE id = ?',
+      )
+      .get('ingest-test-001');
+    assert.equal(row.title, 'Imported sketch');
+    assert.equal(row.sync_state, 'synced');
+    assert.equal(row.sample_rate, 8000);
+    assert.equal(row.channel_count, 1);
+    assert.equal(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM bookmarks WHERE session_id = ?')
+        .get('ingest-test-001').count,
+      2,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('recorder ingestion is idempotent for exact retries and rejects conflicting audio', async () => {
+  const wav = makeTestWav({ durationSeconds: 1.1, frequency: 330 });
+  const payload = {
+    id: 'ingest-retry-001',
+    device_name: 'recorder emulator',
+    created_at: '2026-05-05T12:30:00.000Z',
+    title: 'Original recorder title',
+    audio: {
+      data_base64: wav.toString('base64'),
+    },
+    bookmarks: [],
+  };
+
+  const created = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  assert.equal(created.response.status, 201);
+
+  await request('/api/sessions/ingest-retry-001', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      title: 'Manager edited title',
+      notes: 'Keep manager-side edits on retry',
+    }),
+  });
+
+  const retry = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  assert.equal(retry.response.status, 200);
+  assert.equal(retry.body.acknowledged, true);
+  assert.equal(retry.body.imported, false);
+  assert.equal(retry.body.duplicate, true);
+  assert.equal(retry.body.session.title, 'Manager edited title');
+  assert.equal(retry.body.session.notes, 'Keep manager-side edits on retry');
+
+  const conflict = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      audio: {
+        data_base64: makeTestWav({
+          durationSeconds: 1.1,
+          frequency: 550,
+        }).toString('base64'),
+      },
+    }),
+  });
+  assert.equal(conflict.response.status, 409);
+  assert.equal(
+    conflict.body.error,
+    'Session id already exists with different audio',
+  );
+
+  const audioPath = path.join(
+    libraryRoot,
+    'sessions',
+    'ingest-retry-001',
+    'source.wav',
+  );
+  assert.equal((await fs.readFile(audioPath)).equals(wav), true);
+});
+
+test('recorder ingestion rejects invalid bookmarks before writing artifacts', async () => {
+  const id = 'ingest-bad-bookmark-001';
+  const { response, body } = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      id,
+      created_at: '2026-05-05T13:00:00.000Z',
+      audio: {
+        data_base64: makeTestWav({ durationSeconds: 0.75 }).toString('base64'),
+      },
+      bookmarks: [
+        {
+          timestamp_seconds: 1.5,
+        },
+      ],
+    }),
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(
+    body.error,
+    'bookmark timestamp_seconds must be within the recording duration',
+  );
+  await assert.rejects(
+    fs.access(path.join(libraryRoot, 'sessions', id)),
+    /ENOENT/,
+  );
+
+  const db = new DatabaseSync(path.join(libraryRoot, 'metadata.sqlite'));
+  try {
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE id = ?').get(id)
+        .count,
+      0,
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test('session title and notes updates persist to sidecar and SQLite', async () => {

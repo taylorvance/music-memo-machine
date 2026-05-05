@@ -8,6 +8,7 @@ This repo currently contains the management/review prototype. The physical recor
 
 - React/Vite review UI for sessions, bookmarks, clips, trash, and storage pressure simulation.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
+- Manager-side JSON ingestion endpoint for recorder/emulator session imports.
 - Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
@@ -19,7 +20,7 @@ Not built yet:
 - Minimal recorder emulator app for testing capture/sync without hardware.
 - Real microphone capture, GPIO buttons, status LED, and silence auto-stop.
 - Automated Pi bootstrap/deploy scripts.
-- Durable recorder-to-manager sync and post-ack deletion policy.
+- Recorder-side durable sync retries and post-ack deletion policy.
 
 ## Quick Start
 
@@ -73,6 +74,12 @@ By default, the library lives in `library/`, which is intentionally gitignored. 
 LIBRARY_DIR=/var/lib/music-memo-machine/library npm run dev
 ```
 
+Recorder/emulator session ingestion currently accepts base64 WAVs in JSON with a default `32mb` request limit. Set `JSON_BODY_LIMIT` if local test payloads need more room:
+
+```bash
+JSON_BODY_LIMIT=64mb npm run dev
+```
+
 ## Scripts
 
 - `npm run dev`: start the API and Vite dev server on localhost.
@@ -91,6 +98,7 @@ LIBRARY_DIR=/var/lib/music-memo-machine/library npm run dev
 - `SPEC.md`: product spec and design notes.
 - `docs/ROADMAP.md`: implementation priorities and active planning context.
 - `docs/deployment.md`: intended Pi/manager deployment strategy.
+- `docs/ingestion.md`: manager session import contract for the emulator and recorder.
 - `server/`: Express API and metadata store.
 - `src/`: React review UI.
 - `scripts/`: fixture and future automation scripts.
