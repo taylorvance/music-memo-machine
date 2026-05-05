@@ -2,13 +2,14 @@
 
 Music Memo Machine is a low-friction system for capturing rough music ideas and turning the useful parts into saved memos. The intended product is a small always-available recorder near an instrument, paired with a local web app for review, trimming, storage management, and cleanup.
 
-This repo currently contains the management/review prototype. The physical recorder, recorder emulator, deployment scripts, and sync lifecycle are still roadmap items.
+This repo currently contains the management/review prototype and a minimal recorder emulator. The physical recorder, deployment scripts, and recorder sync lifecycle are still roadmap items.
 
 ## Current Status
 
 - React/Vite review UI for sessions, bookmarks, clips, trash, and storage pressure simulation.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
 - Manager-side JSON ingestion endpoint for recorder/emulator session imports.
+- Scriptable recorder emulator for generated WAV sessions, bookmark timing, payload replay, and duplicate-submit testing.
 - Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
@@ -17,7 +18,6 @@ This repo currently contains the management/review prototype. The physical recor
 Not built yet:
 
 - Raspberry Pi recorder service.
-- Minimal recorder emulator app for testing capture/sync without hardware.
 - Real microphone capture, GPIO buttons, status LED, and silence auto-stop.
 - Automated Pi bootstrap/deploy scripts.
 - Recorder-side durable sync retries and post-ack deletion policy.
@@ -53,6 +53,12 @@ Run tests:
 
 ```bash
 npm test
+```
+
+Submit a generated recorder-emulator session to a running manager:
+
+```bash
+npm run emulator -- --duration 8 --bookmark 2.5 --bookmark 6:ending
 ```
 
 Run the full local quality gate:
@@ -92,12 +98,14 @@ JSON_BODY_LIMIT=64mb npm run dev
 - `npm run clean`: remove installed dependencies and reproducible build/cache artifacts.
 - `npm run preview`: run the Express server in production mode.
 - `npm run seed` / `npm run reset`: regenerate fixture sessions and clips.
+- `npm run emulator`: generate or replay recorder-emulator sessions through the manager ingestion endpoint.
 
 ## Repo Layout
 
 - `SPEC.md`: product spec and design notes.
 - `docs/ROADMAP.md`: implementation priorities and active planning context.
 - `docs/deployment.md`: intended Pi/manager deployment strategy.
+- `docs/emulator.md`: recorder emulator usage and sync/idempotency scenarios.
 - `docs/ingestion.md`: manager session import contract for the emulator and recorder.
 - `server/`: Express API and metadata store.
 - `src/`: React review UI.

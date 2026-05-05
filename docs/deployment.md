@@ -105,15 +105,17 @@ Expected responsibilities:
 
 ## Recorder Emulator
 
-The emulator should arrive before the hardware recorder. It gives the manager app realistic input without flashing a Pi or wiring hardware.
+The emulator exists as `npm run emulator`. It gives the manager app realistic input without flashing a Pi or wiring hardware.
 
-Minimum useful behavior:
+Current behavior:
 
-- Start/stop a fake recording.
-- Add bookmarks during the fake recording.
 - Generate a short WAV file and session metadata.
+- Add timestamped bookmarks.
 - Submit that session through `POST /api/ingest/sessions`.
-- Support repeatable test scenarios for sync failure and duplicate submission.
+- Save and replay ingest payloads.
+- Submit the same payload multiple times to exercise duplicate acknowledgement.
+
+See `docs/emulator.md` for usage.
 
 ## When to Add Heavier Tooling
 

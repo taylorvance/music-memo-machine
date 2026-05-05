@@ -830,7 +830,7 @@ async function ingestSession(payload) {
     clips: [],
   };
 
-  await fs.mkdir(sessionDir, { recursive: false });
+  await fs.mkdir(sessionDir, { recursive: true });
   await fs.writeFile(path.join(sessionDir, session.audio_path), audio);
   await saveSession(session);
 

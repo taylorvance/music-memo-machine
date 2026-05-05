@@ -15,6 +15,7 @@
     "preview": "NODE_ENV=production node server/index.js",
     "reset": "node scripts/seed-fixtures.mjs",
     "seed": "node scripts/seed-fixtures.mjs",
+    "emulator": "node scripts/recorder-emulator.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:watch": "node --test --watch tests/*.test.mjs"
   },
