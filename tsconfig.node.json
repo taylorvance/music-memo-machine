@@ -1,0 +1,9 @@
+{
+  "extends": "@taylorvance/tv-shared-dev/tsconfig/vite-node.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts"]
+}

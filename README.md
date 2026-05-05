@@ -11,6 +11,7 @@ This repo currently contains the management/review prototype. The physical recor
 - Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
+- Shared `tv-shared` dev conventions for linting, formatting, TypeScript baselines, and CI verification.
 
 Not built yet:
 
@@ -53,6 +54,12 @@ Run tests:
 npm test
 ```
 
+Run the full local quality gate:
+
+```bash
+npm run verify
+```
+
 Build and run the production server locally:
 
 ```bash
@@ -70,10 +77,14 @@ LIBRARY_DIR=/var/lib/music-memo-machine/library npm run dev
 
 - `npm run dev`: start the API and Vite dev server on localhost.
 - `npm run dev:lan`: start both servers bound to `0.0.0.0` for LAN testing.
+- `npm run lint`: run ESLint with the shared `tv-shared` React app config plus local Node overrides.
+- `npm run test`: run Node integration tests.
+- `npm run test:watch`: run Node integration tests in watch mode.
 - `npm run build`: typecheck and build the web UI into `dist/`.
+- `npm run verify`: run lint, tests, and build.
+- `npm run clean`: remove installed dependencies and reproducible build/cache artifacts.
 - `npm run preview`: run the Express server in production mode.
 - `npm run seed` / `npm run reset`: regenerate fixture sessions and clips.
-- `npm test`: run Node integration tests.
 
 ## Repo Layout
 
@@ -84,6 +95,7 @@ LIBRARY_DIR=/var/lib/music-memo-machine/library npm run dev
 - `src/`: React review UI.
 - `scripts/`: fixture and future automation scripts.
 - `tests/`: Node integration tests.
+- `.github/workflows/`: thin wrappers around reusable `tv-shared` workflow logic.
 - `library/`: local generated media/metadata data, ignored by git.
 
 ## Architecture Direction

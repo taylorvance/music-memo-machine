@@ -1,8 +1,29 @@
-export type SessionState = "unreviewed" | "bookmarked" | "resolved" | "dismissed" | "archival_context";
-export type RetentionClass = "throwaway" | "review_pending" | "archival_context" | "protected";
-export type CompressionState = "raw_wav" | "flac" | "lossy" | "pending_compression";
-export type SyncState = "local_only" | "pending_sync" | "synced" | "sync_failed";
-export type BookmarkState = "unresolved" | "resolved" | "dismissed" | "captured";
+export type SessionState =
+  | 'unreviewed'
+  | 'bookmarked'
+  | 'resolved'
+  | 'dismissed'
+  | 'archival_context';
+export type RetentionClass =
+  | 'throwaway'
+  | 'review_pending'
+  | 'archival_context'
+  | 'protected';
+export type CompressionState =
+  | 'raw_wav'
+  | 'flac'
+  | 'lossy'
+  | 'pending_compression';
+export type SyncState =
+  | 'local_only'
+  | 'pending_sync'
+  | 'synced'
+  | 'sync_failed';
+export type BookmarkState =
+  | 'unresolved'
+  | 'resolved'
+  | 'dismissed'
+  | 'captured';
 
 export interface Bookmark {
   id: string;
@@ -26,7 +47,7 @@ export interface Clip {
   storage_size_bytes: number;
 }
 
-export type TrashSourceState = "active" | "trashed" | "unavailable";
+export type TrashSourceState = 'active' | 'trashed' | 'unavailable';
 
 export interface WaveformCache {
   session_id: string;
@@ -102,7 +123,14 @@ export interface TrashedSession {
   id: string;
   deleted_at: string;
   purge_after: string;
-  session: Omit<Session, "audio_url" | "source_size_bytes" | "actual_source_size_bytes" | "clip_details" | "waveform">;
+  session: Omit<
+    Session,
+    | 'audio_url'
+    | 'source_size_bytes'
+    | 'actual_source_size_bytes'
+    | 'clip_details'
+    | 'waveform'
+  >;
 }
 
 export interface TrashedClip {
@@ -110,14 +138,14 @@ export interface TrashedClip {
   deleted_at: string;
   purge_after: string;
   source_state: TrashSourceState;
-  clip: Omit<Clip, "audio_url">;
+  clip: Omit<Clip, 'audio_url'>;
 }
 
 export type QueueFilter =
-  | "needs_review"
-  | "bookmarks"
-  | "clips"
-  | "archived"
-  | "safe_delete"
-  | "sync_problem"
-  | "all";
+  | 'needs_review'
+  | 'bookmarks'
+  | 'clips'
+  | 'archived'
+  | 'safe_delete'
+  | 'sync_problem'
+  | 'all';

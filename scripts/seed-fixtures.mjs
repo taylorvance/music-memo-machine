@@ -1,11 +1,13 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { createMetadataStore } from "../server/metadata-store.js";
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createMetadataStore } from '../server/metadata-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..");
-const libraryRoot = path.resolve(process.env.LIBRARY_DIR || path.join(projectRoot, "library"));
+const projectRoot = path.resolve(__dirname, '..');
+const libraryRoot = path.resolve(
+  process.env.LIBRARY_DIR || path.join(projectRoot, 'library'),
+);
 const sampleRate = 16_000;
 const channels = 1;
 const bytesPerSample = 2;
@@ -13,192 +15,215 @@ const bytesPerSecond = sampleRate * channels * bytesPerSample;
 
 const sessions = [
   {
-    id: "session-2026-05-02-001",
-    created_at: "2026-05-02T09:12:00-05:00",
+    id: 'session-2026-05-02-001',
+    created_at: '2026-05-02T09:12:00-05:00',
     duration_seconds: 28,
-    state: "unreviewed",
-    retention_class: "throwaway",
-    compression_state: "raw_wav",
-    sync_state: "local_only",
-    notes: "",
+    state: 'unreviewed',
+    retention_class: 'throwaway',
+    compression_state: 'raw_wav',
+    sync_state: 'local_only',
+    notes: '',
     storage_size_bytes: 310 * 1024 * 1024,
     bookmarks: [],
-    pattern: { base: 196, accent: 0.45, silences: [] }
+    pattern: { base: 196, accent: 0.45, silences: [] },
   },
   {
-    id: "session-2026-04-11-002",
-    created_at: "2026-04-11T20:30:00-05:00",
+    id: 'session-2026-04-11-002',
+    created_at: '2026-04-11T20:30:00-05:00',
     duration_seconds: 95,
-    state: "unreviewed",
-    retention_class: "throwaway",
-    compression_state: "raw_wav",
-    sync_state: "local_only",
-    notes: "",
+    state: 'unreviewed',
+    retention_class: 'throwaway',
+    compression_state: 'raw_wav',
+    sync_state: 'local_only',
+    notes: '',
     storage_size_bytes: 1450 * 1024 * 1024,
     bookmarks: [],
-    pattern: { base: 147, accent: 0.25, silences: [[34, 46], [74, 81]] }
+    pattern: {
+      base: 147,
+      accent: 0.25,
+      silences: [
+        [34, 46],
+        [74, 81],
+      ],
+    },
   },
   {
-    id: "session-2026-05-02-003",
-    created_at: "2026-05-02T11:48:00-05:00",
+    id: 'session-2026-05-02-003',
+    created_at: '2026-05-02T11:48:00-05:00',
     duration_seconds: 64,
-    state: "bookmarked",
-    retention_class: "review_pending",
-    compression_state: "raw_wav",
-    sync_state: "pending_sync",
-    notes: "Left hand figure gets interesting after the bookmark.",
+    state: 'bookmarked',
+    retention_class: 'review_pending',
+    compression_state: 'raw_wav',
+    sync_state: 'pending_sync',
+    notes: 'Left hand figure gets interesting after the bookmark.',
     storage_size_bytes: 760 * 1024 * 1024,
     bookmarks: [
       {
-        id: "bookmark-001",
+        id: 'bookmark-001',
         timestamp_seconds: 24.5,
-        created_at: "2026-05-02T11:48:25-05:00",
-        state: "unresolved",
-        note: ""
-      }
+        created_at: '2026-05-02T11:48:25-05:00',
+        state: 'unresolved',
+        note: '',
+      },
     ],
-    pattern: { base: 220, accent: 0.55, silences: [[51, 56]] }
+    pattern: { base: 220, accent: 0.55, silences: [[51, 56]] },
   },
   {
-    id: "session-2026-05-01-004",
-    created_at: "2026-05-01T22:04:00-05:00",
+    id: 'session-2026-05-01-004',
+    created_at: '2026-05-01T22:04:00-05:00',
     duration_seconds: 88,
-    state: "bookmarked",
-    retention_class: "review_pending",
-    compression_state: "raw_wav",
-    sync_state: "local_only",
-    notes: "",
+    state: 'bookmarked',
+    retention_class: 'review_pending',
+    compression_state: 'raw_wav',
+    sync_state: 'local_only',
+    notes: '',
     storage_size_bytes: 1100 * 1024 * 1024,
     bookmarks: [
       {
-        id: "bookmark-001",
+        id: 'bookmark-001',
         timestamp_seconds: 14.2,
-        created_at: "2026-05-01T22:04:14-05:00",
-        state: "unresolved",
-        note: "Intro variation"
+        created_at: '2026-05-01T22:04:14-05:00',
+        state: 'unresolved',
+        note: 'Intro variation',
       },
       {
-        id: "bookmark-002",
+        id: 'bookmark-002',
         timestamp_seconds: 43.8,
-        created_at: "2026-05-01T22:04:44-05:00",
-        state: "unresolved",
-        note: ""
+        created_at: '2026-05-01T22:04:44-05:00',
+        state: 'unresolved',
+        note: '',
       },
       {
-        id: "bookmark-003",
+        id: 'bookmark-003',
         timestamp_seconds: 68.1,
-        created_at: "2026-05-01T22:05:08-05:00",
-        state: "unresolved",
-        note: "Possible ending"
-      }
+        created_at: '2026-05-01T22:05:08-05:00',
+        state: 'unresolved',
+        note: 'Possible ending',
+      },
     ],
-    pattern: { base: 246.94, accent: 0.7, silences: [[30, 34], [59, 62]] }
+    pattern: {
+      base: 246.94,
+      accent: 0.7,
+      silences: [
+        [30, 34],
+        [59, 62],
+      ],
+    },
   },
   {
-    id: "session-2026-05-02-005",
-    created_at: "2026-05-02T13:15:00-05:00",
+    id: 'session-2026-05-02-005',
+    created_at: '2026-05-02T13:15:00-05:00',
     duration_seconds: 52,
-    state: "bookmarked",
-    retention_class: "review_pending",
-    compression_state: "raw_wav",
-    sync_state: "local_only",
-    notes: "Whole pass may be worth keeping.",
+    state: 'bookmarked',
+    retention_class: 'review_pending',
+    compression_state: 'raw_wav',
+    sync_state: 'local_only',
+    notes: 'Whole pass may be worth keeping.',
     storage_size_bytes: 610 * 1024 * 1024,
     bookmarks: [
       {
-        id: "bookmark-001",
+        id: 'bookmark-001',
         timestamp_seconds: 4.1,
-        created_at: "2026-05-02T13:15:04-05:00",
-        state: "unresolved",
-        note: "Full take"
-      }
+        created_at: '2026-05-02T13:15:04-05:00',
+        state: 'unresolved',
+        note: 'Full take',
+      },
     ],
-    pattern: { base: 174.61, accent: 0.6, silences: [] }
+    pattern: { base: 174.61, accent: 0.6, silences: [] },
   },
   {
-    id: "session-2026-04-30-006",
-    created_at: "2026-04-30T18:06:00-05:00",
+    id: 'session-2026-04-30-006',
+    created_at: '2026-04-30T18:06:00-05:00',
     duration_seconds: 76,
-    state: "bookmarked",
-    retention_class: "review_pending",
-    compression_state: "raw_wav",
-    sync_state: "sync_failed",
-    notes: "Lots of stop/start space around the useful sections.",
+    state: 'bookmarked',
+    retention_class: 'review_pending',
+    compression_state: 'raw_wav',
+    sync_state: 'sync_failed',
+    notes: 'Lots of stop/start space around the useful sections.',
     storage_size_bytes: 890 * 1024 * 1024,
     bookmarks: [
       {
-        id: "bookmark-001",
+        id: 'bookmark-001',
         timestamp_seconds: 35.4,
-        created_at: "2026-04-30T18:06:35-05:00",
-        state: "unresolved",
-        note: ""
+        created_at: '2026-04-30T18:06:35-05:00',
+        state: 'unresolved',
+        note: '',
       },
       {
-        id: "bookmark-002",
+        id: 'bookmark-002',
         timestamp_seconds: 58.6,
-        created_at: "2026-04-30T18:06:59-05:00",
-        state: "unresolved",
-        note: ""
-      }
+        created_at: '2026-04-30T18:06:59-05:00',
+        state: 'unresolved',
+        note: '',
+      },
     ],
-    pattern: { base: 261.63, accent: 0.5, silences: [[8, 17], [28, 33], [49, 57], [68, 74]] }
+    pattern: {
+      base: 261.63,
+      accent: 0.5,
+      silences: [
+        [8, 17],
+        [28, 33],
+        [49, 57],
+        [68, 74],
+      ],
+    },
   },
   {
-    id: "session-2026-04-15-007",
-    created_at: "2026-04-15T21:42:00-05:00",
+    id: 'session-2026-04-15-007',
+    created_at: '2026-04-15T21:42:00-05:00',
     duration_seconds: 82,
-    state: "archival_context",
-    retention_class: "archival_context",
-    compression_state: "raw_wav",
-    sync_state: "pending_sync",
-    notes: "Already clipped; source stays around as context.",
+    state: 'archival_context',
+    retention_class: 'archival_context',
+    compression_state: 'raw_wav',
+    sync_state: 'pending_sync',
+    notes: 'Already clipped; source stays around as context.',
     storage_size_bytes: 980 * 1024 * 1024,
-    clips: ["clip-2026-04-15-001", "clip-2026-04-15-002"],
+    clips: ['clip-2026-04-15-001', 'clip-2026-04-15-002'],
     bookmarks: [
       {
-        id: "bookmark-001",
+        id: 'bookmark-001',
         timestamp_seconds: 22.5,
-        created_at: "2026-04-15T21:42:23-05:00",
-        state: "resolved",
-        note: "Main riff"
+        created_at: '2026-04-15T21:42:23-05:00',
+        state: 'resolved',
+        note: 'Main riff',
       },
       {
-        id: "bookmark-002",
+        id: 'bookmark-002',
         timestamp_seconds: 61.8,
-        created_at: "2026-04-15T21:43:02-05:00",
-        state: "resolved",
-        note: "Bridge sketch"
-      }
+        created_at: '2026-04-15T21:43:02-05:00',
+        state: 'resolved',
+        note: 'Bridge sketch',
+      },
     ],
-    pattern: { base: 185, accent: 0.65, silences: [[39, 47]] }
-  }
+    pattern: { base: 185, accent: 0.65, silences: [[39, 47]] },
+  },
 ];
 
 const clipFixtures = [
   {
-    id: "clip-2026-04-15-001",
-    source_session_id: "session-2026-04-15-007",
+    id: 'clip-2026-04-15-001',
+    source_session_id: 'session-2026-04-15-007',
     source_start_seconds: 18,
     source_end_seconds: 38,
-    audio_path: "clip-2026-04-15-001.wav",
-    created_at: "2026-04-15T22:03:00-05:00",
-    title: "Main riff memo",
-    notes: "",
-    sync_state: "local_only",
-    storage_size_bytes: 120 * 1024 * 1024
+    audio_path: 'clip-2026-04-15-001.wav',
+    created_at: '2026-04-15T22:03:00-05:00',
+    title: 'Main riff memo',
+    notes: '',
+    sync_state: 'local_only',
+    storage_size_bytes: 120 * 1024 * 1024,
   },
   {
-    id: "clip-2026-04-15-002",
-    source_session_id: "session-2026-04-15-007",
+    id: 'clip-2026-04-15-002',
+    source_session_id: 'session-2026-04-15-007',
     source_start_seconds: 56,
     source_end_seconds: 72,
-    audio_path: "clip-2026-04-15-002.wav",
-    created_at: "2026-04-15T22:09:00-05:00",
-    title: "Bridge sketch",
-    notes: "Could resolve down instead of up.",
-    sync_state: "synced",
-    storage_size_bytes: 96 * 1024 * 1024
-  }
+    audio_path: 'clip-2026-04-15-002.wav',
+    created_at: '2026-04-15T22:09:00-05:00',
+    title: 'Bridge sketch',
+    notes: 'Could resolve down instead of up.',
+    sync_state: 'synced',
+    storage_size_bytes: 96 * 1024 * 1024,
+  },
 ];
 
 function ensurePcm16(value) {
@@ -235,10 +260,10 @@ function makeWav(duration, pattern) {
   const dataSize = samples * channels * bytesPerSample;
   const buffer = Buffer.alloc(44 + dataSize);
 
-  buffer.write("RIFF", 0);
+  buffer.write('RIFF', 0);
   buffer.writeUInt32LE(36 + dataSize, 4);
-  buffer.write("WAVE", 8);
-  buffer.write("fmt ", 12);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
   buffer.writeUInt32LE(16, 16);
   buffer.writeUInt16LE(1, 20);
   buffer.writeUInt16LE(channels, 22);
@@ -246,12 +271,15 @@ function makeWav(duration, pattern) {
   buffer.writeUInt32LE(bytesPerSecond, 28);
   buffer.writeUInt16LE(channels * bytesPerSample, 32);
   buffer.writeUInt16LE(16, 34);
-  buffer.write("data", 36);
+  buffer.write('data', 36);
   buffer.writeUInt32LE(dataSize, 40);
 
   for (let index = 0; index < samples; index += 1) {
     const t = index / sampleRate;
-    buffer.writeInt16LE(ensurePcm16(sampleAt(t, duration, pattern)), 44 + index * 2);
+    buffer.writeInt16LE(
+      ensurePcm16(sampleAt(t, duration, pattern)),
+      44 + index * 2,
+    );
   }
 
   return buffer;
@@ -260,8 +288,12 @@ function makeWav(duration, pattern) {
 function waveformPeaks(duration, pattern, bucketCount = 180) {
   return Array.from({ length: bucketCount }, (_, index) => {
     const t = (duration * index) / bucketCount;
-    const samples = [0, 0.18, 0.36, 0.54, 0.72].map((offset) => Math.abs(sampleAt(t + offset, duration, pattern)));
-    return Number(Math.max(0.02, Math.min(1, Math.max(...samples) * 6)).toFixed(3));
+    const samples = [0, 0.18, 0.36, 0.54, 0.72].map((offset) =>
+      Math.abs(sampleAt(t + offset, duration, pattern)),
+    );
+    return Number(
+      Math.max(0.02, Math.min(1, Math.max(...samples) * 6)).toFixed(3),
+    );
   });
 }
 
@@ -283,56 +315,61 @@ async function writeJson(filePath, data) {
 
 async function main() {
   await fs.rm(libraryRoot, { recursive: true, force: true });
-  await fs.mkdir(path.join(libraryRoot, "sessions"), { recursive: true });
-  await fs.mkdir(path.join(libraryRoot, "clips"), { recursive: true });
-  await fs.mkdir(path.join(libraryRoot, "cache", "waveforms"), { recursive: true });
+  await fs.mkdir(path.join(libraryRoot, 'sessions'), { recursive: true });
+  await fs.mkdir(path.join(libraryRoot, 'clips'), { recursive: true });
+  await fs.mkdir(path.join(libraryRoot, 'cache', 'waveforms'), {
+    recursive: true,
+  });
 
   const wavBySession = new Map();
 
   for (const fixture of sessions) {
-    const sessionDir = path.join(libraryRoot, "sessions", fixture.id);
+    const sessionDir = path.join(libraryRoot, 'sessions', fixture.id);
     const wav = makeWav(fixture.duration_seconds, fixture.pattern);
     wavBySession.set(fixture.id, wav);
     await fs.mkdir(sessionDir, { recursive: true });
-    await fs.writeFile(path.join(sessionDir, "source.wav"), wav);
-    await writeJson(path.join(sessionDir, "session.json"), {
+    await fs.writeFile(path.join(sessionDir, 'source.wav'), wav);
+    await writeJson(path.join(sessionDir, 'session.json'), {
       id: fixture.id,
       created_at: fixture.created_at,
-      title: fixture.title || "",
+      title: fixture.title || '',
       duration_seconds: fixture.duration_seconds,
-      audio_path: "source.wav",
+      audio_path: 'source.wav',
       state: fixture.state,
       retention_class: fixture.retention_class,
       compression_state: fixture.compression_state,
       sync_state: fixture.sync_state,
       notes: fixture.notes,
-      device_name: "fixture room mic",
+      device_name: 'fixture room mic',
       sample_rate: sampleRate,
       channel_count: channels,
       storage_size_bytes: fixture.storage_size_bytes,
       bookmarks: fixture.bookmarks || [],
-      clips: fixture.clips || []
+      clips: fixture.clips || [],
     });
-    await writeJson(path.join(libraryRoot, "cache", "waveforms", `${fixture.id}.json`), {
-      session_id: fixture.id,
-      generated_at: "2026-05-02T22:00:00-05:00",
-      source: "fixture_synth",
-      bucket_count: 180,
-      peaks: waveformPeaks(fixture.duration_seconds, fixture.pattern)
-    });
+    await writeJson(
+      path.join(libraryRoot, 'cache', 'waveforms', `${fixture.id}.json`),
+      {
+        session_id: fixture.id,
+        generated_at: '2026-05-02T22:00:00-05:00',
+        source: 'fixture_synth',
+        bucket_count: 180,
+        peaks: waveformPeaks(fixture.duration_seconds, fixture.pattern),
+      },
+    );
   }
 
   for (const clip of clipFixtures) {
     const source = wavBySession.get(clip.source_session_id);
     await fs.writeFile(
-      path.join(libraryRoot, "clips", clip.audio_path),
-      sliceWav(source, clip.source_start_seconds, clip.source_end_seconds)
+      path.join(libraryRoot, 'clips', clip.audio_path),
+      sliceWav(source, clip.source_start_seconds, clip.source_end_seconds),
     );
-    await writeJson(path.join(libraryRoot, "clips", `${clip.id}.json`), clip);
+    await writeJson(path.join(libraryRoot, 'clips', `${clip.id}.json`), clip);
   }
 
-  await writeJson(path.join(libraryRoot, "storage-sim.json"), {
-    as_of: "2026-05-02T22:00:00-05:00",
+  await writeJson(path.join(libraryRoot, 'storage-sim.json'), {
+    as_of: '2026-05-02T22:00:00-05:00',
     total_bytes: 8 * 1024 * 1024 * 1024,
     simulated_free_bytes: 950 * 1024 * 1024,
     policy: {
@@ -341,8 +378,8 @@ async function main() {
       unbookmarked_retention_days: 14,
       unbookmarked_compression_days: 3,
       archival_compression_days: 30,
-      lossy_only_throwaway: true
-    }
+      lossy_only_throwaway: true,
+    },
   });
 
   const store = createMetadataStore(libraryRoot);
@@ -352,8 +389,10 @@ async function main() {
     store.close();
   }
 
-  console.log(`Seeded ${sessions.length} sessions and ${clipFixtures.length} clips in ${libraryRoot}`);
-  console.log(`Metadata: ${path.join(libraryRoot, "metadata.sqlite")}`);
+  console.log(
+    `Seeded ${sessions.length} sessions and ${clipFixtures.length} clips in ${libraryRoot}`,
+  );
+  console.log(`Metadata: ${path.join(libraryRoot, 'metadata.sqlite')}`);
 }
 
 main().catch((error) => {

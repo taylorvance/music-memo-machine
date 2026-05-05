@@ -18,6 +18,7 @@ The management/review prototype exists:
 - Review UI with waveform, bookmarks, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
 - Express API with SQLite metadata plus sidecar JSON files.
 - Integration tests for important API behavior.
+- Shared `tv-shared` lint, formatting, TypeScript, and CI verification conventions.
 
 The recorder side does not exist yet. Real capture, GPIO controls, LED state, silence auto-stop, sync, and deployment automation are still open.
 

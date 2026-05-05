@@ -1,7 +1,7 @@
-import fsSync from "node:fs";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import fsSync from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 const schema = `
 PRAGMA foreign_keys = ON;
@@ -68,7 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
 export function createMetadataStore(libraryRoot) {
   fsSync.mkdirSync(libraryRoot, { recursive: true });
 
-  const dbPath = path.join(libraryRoot, "metadata.sqlite");
+  const dbPath = path.join(libraryRoot, 'metadata.sqlite');
   const db = new DatabaseSync(dbPath);
   db.exec(schema);
   migrateSchema();
@@ -78,7 +78,7 @@ export function createMetadataStore(libraryRoot) {
   }
 
   function hasSessions() {
-    return db.prepare("SELECT COUNT(*) AS count FROM sessions").get().count > 0;
+    return db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count > 0;
   }
 
   async function importSidecarLibrary({ replace = false } = {}) {
@@ -91,10 +91,10 @@ export function createMetadataStore(libraryRoot) {
 
     transaction(() => {
       if (replace) {
-        db.prepare("DELETE FROM session_clips").run();
-        db.prepare("DELETE FROM bookmarks").run();
-        db.prepare("DELETE FROM clips").run();
-        db.prepare("DELETE FROM sessions").run();
+        db.prepare('DELETE FROM session_clips').run();
+        db.prepare('DELETE FROM bookmarks').run();
+        db.prepare('DELETE FROM clips').run();
+        db.prepare('DELETE FROM sessions').run();
       }
 
       for (const session of sessions) {
@@ -110,38 +110,44 @@ export function createMetadataStore(libraryRoot) {
       for (const session of sessions) {
         replaceSessionClipRows(
           session.id,
-          (session.clips || []).filter((clipId) => clipIds.has(clipId))
+          (session.clips || []).filter((clipId) => clipIds.has(clipId)),
         );
       }
     });
 
     return {
       imported_sessions: sessions.length,
-      imported_clips: clips.length
+      imported_clips: clips.length,
     };
   }
 
   function loadSessionsMetadata() {
     return db
-      .prepare("SELECT * FROM sessions ORDER BY datetime(created_at) DESC, id DESC")
+      .prepare(
+        'SELECT * FROM sessions ORDER BY datetime(created_at) DESC, id DESC',
+      )
       .all()
       .map((row) => hydrateSession(row));
   }
 
   function loadSessionMetadata(sessionId) {
-    const row = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
+    const row = db
+      .prepare('SELECT * FROM sessions WHERE id = ?')
+      .get(sessionId);
     return row ? hydrateSession(row) : null;
   }
 
   function loadClipsMetadata() {
     return db
-      .prepare("SELECT * FROM clips ORDER BY datetime(created_at) DESC, id DESC")
+      .prepare(
+        'SELECT * FROM clips ORDER BY datetime(created_at) DESC, id DESC',
+      )
       .all()
       .map((row) => clipFromRow(row));
   }
 
   function loadClipMetadata(clipId) {
-    const row = db.prepare("SELECT * FROM clips WHERE id = ?").get(clipId);
+    const row = db.prepare('SELECT * FROM clips WHERE id = ?').get(clipId);
     return row ? clipFromRow(row) : null;
   }
 
@@ -159,7 +165,7 @@ export function createMetadataStore(libraryRoot) {
       upsertClipRow(clip);
       if (clip.source_session_id && sessionExists(clip.source_session_id)) {
         db.prepare(
-          "INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)"
+          'INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)',
         ).run(clip.source_session_id, clip.id);
       }
     });
@@ -167,38 +173,42 @@ export function createMetadataStore(libraryRoot) {
   }
 
   function deleteClipMetadata(clipId) {
-    db.prepare("DELETE FROM clips WHERE id = ?").run(clipId);
+    db.prepare('DELETE FROM clips WHERE id = ?').run(clipId);
   }
 
   function deleteSessionMetadata(sessionId) {
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
   }
 
   function transaction(work) {
-    db.exec("BEGIN IMMEDIATE");
+    db.exec('BEGIN IMMEDIATE');
     try {
       const result = work();
-      db.exec("COMMIT");
+      db.exec('COMMIT');
       return result;
     } catch (error) {
-      db.exec("ROLLBACK");
+      db.exec('ROLLBACK');
       throw error;
     }
   }
 
   function sessionExists(sessionId) {
-    return db.prepare("SELECT 1 AS found FROM sessions WHERE id = ?").get(sessionId) !== undefined;
+    return (
+      db
+        .prepare('SELECT 1 AS found FROM sessions WHERE id = ?')
+        .get(sessionId) !== undefined
+    );
   }
 
   function migrateSchema() {
-    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all();
-    if (!sessionColumns.some((row) => row.name === "title")) {
+    const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all();
+    if (!sessionColumns.some((row) => row.name === 'title')) {
       db.exec("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''");
     }
 
-    const clipForeignKeys = db.prepare("PRAGMA foreign_key_list(clips)").all();
-    if (clipForeignKeys.some((row) => row.table === "sessions")) {
-      db.exec("PRAGMA foreign_keys = OFF");
+    const clipForeignKeys = db.prepare('PRAGMA foreign_key_list(clips)').all();
+    if (clipForeignKeys.some((row) => row.table === 'sessions')) {
+      db.exec('PRAGMA foreign_keys = OFF');
       try {
         db.exec(`
           CREATE TABLE clips_next (
@@ -243,25 +253,35 @@ export function createMetadataStore(libraryRoot) {
           ALTER TABLE clips_next RENAME TO clips;
         `);
       } finally {
-        db.exec("PRAGMA foreign_keys = ON");
+        db.exec('PRAGMA foreign_keys = ON');
       }
     }
 
-    db.exec("CREATE INDEX IF NOT EXISTS idx_clips_source_session ON clips(source_session_id)");
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_clips_source_session ON clips(source_session_id)',
+    );
     migrateBookmarksSchema();
-    db.prepare("UPDATE schema_meta SET value = ? WHERE key = ?").run("4", "schema_version");
+    db.prepare('UPDATE schema_meta SET value = ? WHERE key = ?').run(
+      '4',
+      'schema_version',
+    );
   }
 
   function migrateBookmarksSchema() {
-    const bookmarkColumns = db.prepare("PRAGMA table_info(bookmarks)").all();
-    const hasResultingClipId = bookmarkColumns.some((row) => row.name === "resulting_clip_id");
+    const bookmarkColumns = db.prepare('PRAGMA table_info(bookmarks)').all();
+    const hasResultingClipId = bookmarkColumns.some(
+      (row) => row.name === 'resulting_clip_id',
+    );
 
     if (!hasResultingClipId) {
-      db.prepare("UPDATE bookmarks SET state = ? WHERE state = ?").run("resolved", "captured");
+      db.prepare('UPDATE bookmarks SET state = ? WHERE state = ?').run(
+        'resolved',
+        'captured',
+      );
       return;
     }
 
-    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec('PRAGMA foreign_keys = OFF');
     try {
       db.exec(`
         CREATE TABLE bookmarks_next (
@@ -295,20 +315,26 @@ export function createMetadataStore(libraryRoot) {
         ALTER TABLE bookmarks_next RENAME TO bookmarks;
       `);
     } finally {
-      db.exec("PRAGMA foreign_keys = ON");
+      db.exec('PRAGMA foreign_keys = ON');
     }
 
-    db.exec("CREATE INDEX IF NOT EXISTS idx_bookmarks_session_time ON bookmarks(session_id, timestamp_seconds)");
+    db.exec(
+      'CREATE INDEX IF NOT EXISTS idx_bookmarks_session_time ON bookmarks(session_id, timestamp_seconds)',
+    );
   }
 
   function hydrateSession(row) {
     const session = sessionFromRow(row);
     session.bookmarks = db
-      .prepare("SELECT * FROM bookmarks WHERE session_id = ? ORDER BY timestamp_seconds ASC, id ASC")
+      .prepare(
+        'SELECT * FROM bookmarks WHERE session_id = ? ORDER BY timestamp_seconds ASC, id ASC',
+      )
       .all(session.id)
       .map((bookmark) => bookmarkFromRow(bookmark));
     session.clips = db
-      .prepare("SELECT clip_id FROM session_clips WHERE session_id = ? ORDER BY clip_id ASC")
+      .prepare(
+        'SELECT clip_id FROM session_clips WHERE session_id = ? ORDER BY clip_id ASC',
+      )
       .all(session.id)
       .map((item) => item.clip_id);
     return session;
@@ -345,27 +371,27 @@ export function createMetadataStore(libraryRoot) {
         device_name = excluded.device_name,
         sample_rate = excluded.sample_rate,
         channel_count = excluded.channel_count,
-        storage_size_bytes = excluded.storage_size_bytes`
+        storage_size_bytes = excluded.storage_size_bytes`,
     ).run(
       session.id,
       session.created_at,
-      session.title || "",
+      session.title || '',
       session.duration_seconds,
       session.audio_path,
       session.state,
       session.retention_class,
       session.compression_state,
       session.sync_state,
-      session.notes || "",
+      session.notes || '',
       session.device_name ?? null,
       session.sample_rate ?? null,
       session.channel_count ?? null,
-      session.storage_size_bytes ?? null
+      session.storage_size_bytes ?? null,
     );
   }
 
   function replaceBookmarkRows(sessionId, bookmarks) {
-    db.prepare("DELETE FROM bookmarks WHERE session_id = ?").run(sessionId);
+    db.prepare('DELETE FROM bookmarks WHERE session_id = ?').run(sessionId);
     const insert = db.prepare(
       `INSERT INTO bookmarks (
         id,
@@ -374,7 +400,7 @@ export function createMetadataStore(libraryRoot) {
         created_at,
         state,
         note
-      ) VALUES (?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
     );
 
     for (const bookmark of bookmarks) {
@@ -384,15 +410,15 @@ export function createMetadataStore(libraryRoot) {
         bookmark.timestamp_seconds,
         bookmark.created_at ?? null,
         normalizeBookmarkState(bookmark.state),
-        bookmark.note || ""
+        bookmark.note || '',
       );
     }
   }
 
   function replaceSessionClipRows(sessionId, clipIds) {
-    db.prepare("DELETE FROM session_clips WHERE session_id = ?").run(sessionId);
+    db.prepare('DELETE FROM session_clips WHERE session_id = ?').run(sessionId);
     const insert = db.prepare(
-      "INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)"
+      'INSERT OR IGNORE INTO session_clips (session_id, clip_id) VALUES (?, ?)',
     );
 
     for (const clipId of clipIds) {
@@ -423,7 +449,7 @@ export function createMetadataStore(libraryRoot) {
         title = excluded.title,
         notes = excluded.notes,
         sync_state = excluded.sync_state,
-        storage_size_bytes = excluded.storage_size_bytes`
+        storage_size_bytes = excluded.storage_size_bytes`,
     ).run(
       clip.id,
       clip.source_session_id,
@@ -431,10 +457,10 @@ export function createMetadataStore(libraryRoot) {
       clip.source_end_seconds,
       clip.audio_path,
       clip.created_at,
-      clip.title || "",
-      clip.notes || "",
+      clip.title || '',
+      clip.notes || '',
       clip.sync_state,
-      clip.storage_size_bytes || 0
+      clip.storage_size_bytes || 0,
     );
   }
 
@@ -450,7 +476,7 @@ export function createMetadataStore(libraryRoot) {
     saveSessionMetadata,
     saveClipMetadata,
     deleteClipMetadata,
-    deleteSessionMetadata
+    deleteSessionMetadata,
   };
 }
 
@@ -458,20 +484,20 @@ function sessionFromRow(row) {
   return removeUndefined({
     id: row.id,
     created_at: row.created_at,
-    title: row.title || "",
+    title: row.title || '',
     duration_seconds: row.duration_seconds,
     audio_path: row.audio_path,
     state: row.state,
     retention_class: row.retention_class,
     compression_state: row.compression_state,
     sync_state: row.sync_state,
-    notes: row.notes || "",
+    notes: row.notes || '',
     device_name: row.device_name ?? undefined,
     sample_rate: row.sample_rate ?? undefined,
     channel_count: row.channel_count ?? undefined,
     storage_size_bytes: row.storage_size_bytes ?? undefined,
     bookmarks: [],
-    clips: []
+    clips: [],
   });
 }
 
@@ -481,7 +507,7 @@ function bookmarkFromRow(row) {
     timestamp_seconds: row.timestamp_seconds,
     created_at: row.created_at ?? undefined,
     state: normalizeBookmarkState(row.state),
-    note: row.note || ""
+    note: row.note || '',
   });
 }
 
@@ -493,23 +519,25 @@ function clipFromRow(row) {
     source_end_seconds: row.source_end_seconds,
     audio_path: row.audio_path,
     created_at: row.created_at,
-    title: row.title || "",
-    notes: row.notes || "",
+    title: row.title || '',
+    notes: row.notes || '',
     sync_state: row.sync_state,
-    storage_size_bytes: row.storage_size_bytes || 0
+    storage_size_bytes: row.storage_size_bytes || 0,
   };
 }
 
 function removeUndefined(value) {
-  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  );
 }
 
 function normalizeBookmarkState(state) {
-  return state === "captured" ? "resolved" : state;
+  return state === 'captured' ? 'resolved' : state;
 }
 
 async function readSessionSidecars(libraryRoot) {
-  const root = path.join(libraryRoot, "sessions");
+  const root = path.join(libraryRoot, 'sessions');
   if (!(await pathExists(root))) {
     return [];
   }
@@ -519,17 +547,19 @@ async function readSessionSidecars(libraryRoot) {
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const jsonPath = path.join(root, entry.name, "session.json");
+    const jsonPath = path.join(root, entry.name, 'session.json');
     if (await pathExists(jsonPath)) {
       sessions.push(await readJson(jsonPath));
     }
   }
 
-  return sessions.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  return sessions.sort(
+    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+  );
 }
 
 async function readClipSidecars(libraryRoot) {
-  const clipsRoot = path.join(libraryRoot, "clips");
+  const clipsRoot = path.join(libraryRoot, 'clips');
   if (!(await pathExists(clipsRoot))) {
     return [];
   }
@@ -537,7 +567,7 @@ async function readClipSidecars(libraryRoot) {
   const entries = await fs.readdir(clipsRoot);
   const clips = [];
 
-  for (const entry of entries.filter((item) => item.endsWith(".json")).sort()) {
+  for (const entry of entries.filter((item) => item.endsWith('.json')).sort()) {
     clips.push(await readJson(path.join(clipsRoot, entry)));
   }
 
@@ -545,11 +575,17 @@ async function readClipSidecars(libraryRoot) {
 }
 
 async function writeSessionSidecar(libraryRoot, session) {
-  await writeJson(path.join(libraryRoot, "sessions", session.id, "session.json"), stripRuntimeSessionFields(session));
+  await writeJson(
+    path.join(libraryRoot, 'sessions', session.id, 'session.json'),
+    stripRuntimeSessionFields(session),
+  );
 }
 
 async function writeClipSidecar(libraryRoot, clip) {
-  await writeJson(path.join(libraryRoot, "clips", `${clip.id}.json`), stripRuntimeClipFields(clip));
+  await writeJson(
+    path.join(libraryRoot, 'clips', `${clip.id}.json`),
+    stripRuntimeClipFields(clip),
+  );
 }
 
 function stripRuntimeSessionFields(session) {
@@ -563,10 +599,12 @@ function stripRuntimeSessionFields(session) {
   } = session;
   return {
     ...persisted,
-    bookmarks: (persisted.bookmarks || []).map(({ resulting_clip_id, ...bookmark }) => ({
-      ...bookmark,
-      state: normalizeBookmarkState(bookmark.state)
-    }))
+    bookmarks: (persisted.bookmarks || []).map(
+      ({ resulting_clip_id, ...bookmark }) => ({
+        ...bookmark,
+        state: normalizeBookmarkState(bookmark.state),
+      }),
+    ),
   };
 }
 
@@ -576,7 +614,7 @@ function stripRuntimeClipFields(clip) {
 }
 
 async function readJson(filePath) {
-  const raw = await fs.readFile(filePath, "utf8");
+  const raw = await fs.readFile(filePath, 'utf8');
   return JSON.parse(raw);
 }
 
