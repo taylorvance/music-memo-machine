@@ -102,20 +102,26 @@ class RecorderSpool:
     def read_manifest(self, record: SpoolRecord) -> dict:
         return json.loads(record.manifest_path.read_text(encoding="utf8"))
 
-    def build_payload(self, record: SpoolRecord) -> dict:
+    def build_metadata(self, record: SpoolRecord) -> dict:
         manifest = self.read_manifest(record)
-        audio = record.audio_path.read_bytes()
-        read_wav_info(audio)
         return {
             "id": manifest["id"],
             "device_name": manifest.get("device_name", ""),
             "created_at": manifest["created_at"],
             "title": manifest.get("title", ""),
             "notes": manifest.get("notes", ""),
+            "bookmarks": manifest.get("bookmarks", []),
+        }
+
+    def build_payload(self, record: SpoolRecord) -> dict:
+        metadata = self.build_metadata(record)
+        audio = record.audio_path.read_bytes()
+        read_wav_info(audio)
+        return {
+            **metadata,
             "audio": {
                 "data_base64": base64.b64encode(audio).decode("ascii"),
             },
-            "bookmarks": manifest.get("bookmarks", []),
         }
 
     def mark_synced(self, record: SpoolRecord, ack: dict, delete_audio: bool) -> None:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from pathlib import Path
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 from .config import RecorderConfig
 from .spool import RecorderSpool, SpoolRecord
@@ -27,14 +29,16 @@ class SyncClient:
         self.manager_url = manager_url.rstrip("/") + "/"
         self.timeout_seconds = timeout_seconds
 
-    def post_session(self, payload: dict) -> tuple[int, dict]:
-        body = json.dumps(payload).encode("utf8")
+    def post_session(self, metadata: dict, audio_path: Path) -> tuple[int, dict]:
+        boundary = f"music-memo-{uuid4().hex}"
+        body, content_length = multipart_body(metadata, audio_path, boundary)
         request = Request(
             urljoin(self.manager_url, "api/ingest/sessions"),
             data=body,
             method="POST",
             headers={
-                "Content-Type": "application/json",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Content-Length": str(content_length),
                 "Accept": "application/json",
             },
         )
@@ -64,18 +68,48 @@ class SyncNetworkError(Exception):
     pass
 
 
+def multipart_body(metadata: dict, audio_path: Path, boundary: str):
+    metadata_json = json.dumps(metadata, separators=(",", ":")).encode("utf8")
+    metadata_part = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="metadata"\r\n'
+        "Content-Type: application/json\r\n\r\n"
+    ).encode("utf8") + metadata_json + b"\r\n"
+    audio_header = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="audio"; filename="source.wav"\r\n'
+        "Content-Type: audio/wav\r\n\r\n"
+    ).encode("utf8")
+    closing = f"\r\n--{boundary}--\r\n".encode("utf8")
+    audio_size = audio_path.stat().st_size
+    content_length = len(metadata_part) + len(audio_header) + audio_size + len(closing)
+
+    def chunks():
+        yield metadata_part
+        yield audio_header
+        with audio_path.open("rb") as audio_file:
+            while True:
+                chunk = audio_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        yield closing
+
+    return chunks(), content_length
+
+
 def sync_record(
     spool: RecorderSpool,
     record: SpoolRecord,
     client: SyncClient,
     config: RecorderConfig,
 ) -> SyncOutcome:
-    payload = spool.build_payload(record)
+    metadata = spool.build_metadata(record)
     last_error: Exception | None = None
 
     for attempt in range(1, config.sync_attempts + 1):
         try:
-            status, body = client.post_session(payload)
+            status, body = client.post_session(metadata, record.audio_path)
             acknowledged = body.get("acknowledged") is True
             if not acknowledged:
                 raise SyncHTTPError(status, body)

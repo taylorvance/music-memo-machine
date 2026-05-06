@@ -166,17 +166,6 @@ function normalizedBookmarkState(state: BookmarkState) {
   return state === 'captured' ? 'resolved' : state;
 }
 
-function fakePeaks(duration: number) {
-  return Array.from({ length: 140 }, (_, index) => {
-    const t = index / 140;
-    return Math.max(
-      0.08,
-      Math.abs(Math.sin(t * duration * 0.31)) * 0.55 +
-        Math.abs(Math.sin(t * 13)) * 0.22,
-    );
-  });
-}
-
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -1066,9 +1055,7 @@ function Waveform({
 }) {
   const waveformRef = useRef<HTMLDivElement | null>(null);
   const dragState = useRef<RangeDragState | null>(null);
-  const peaks = session.waveform?.peaks?.length
-    ? session.waveform.peaks
-    : fakePeaks(session.duration_seconds);
+  const peaks = session.waveform?.peaks || [];
 
   useEffect(() => {
     if (!selectedBookmarkId) {
@@ -1320,14 +1307,18 @@ function Waveform({
         onPointerUp={endDrag}
         onPointerCancel={cancelDrag}
       >
-        <div className="bars" aria-hidden="true">
-          {peaks.map((peak, index) => (
-            <span
-              key={`${session.id}-${index}`}
-              style={{ height: `${Math.max(6, peak * 100)}%` }}
-            />
-          ))}
-        </div>
+        {peaks.length ? (
+          <div className="bars" aria-hidden="true">
+            {peaks.map((peak, index) => (
+              <span
+                key={`${session.id}-${index}`}
+                style={{ height: `${Math.max(6, peak * 100)}%` }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="waveform-empty">Waveform unavailable</div>
+        )}
         <div
           className="selection"
           style={{

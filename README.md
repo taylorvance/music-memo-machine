@@ -9,11 +9,11 @@ This repo currently contains the management/review prototype, a browser-based re
 - React/Vite review UI for sessions, bookmarks, clips, trash, and storage pressure simulation.
 - Browser recorder emulator with microphone capture, record/stop/bookmark controls, a virtual status light, WAV encoding, and manager sync.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
-- Manager-side JSON ingestion endpoint for recorder/emulator session imports.
+- Manager-side multipart ingestion endpoint for recorder/emulator WAV imports, with JSON/base64 compatibility for small saved payloads.
 - CLI recorder test harness for generated WAV sessions, payload replay, and duplicate-submit testing.
 - Python Pi recorder service with mock and `arecord` audio backends, optional `gpiozero` button/LED wiring, local spool state, sync retries, and unit tests.
 - Pi bootstrap/service installer scripts and a checked-in systemd unit template.
-- Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
+- Local library layout with session WAVs, clip WAVs, manager-generated waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
 - Shared `tv-shared` dev conventions for linting, formatting, TypeScript baselines, and CI verification.
@@ -86,7 +86,13 @@ By default, the library lives in `library/`, which is intentionally gitignored. 
 LIBRARY_DIR=/var/lib/music-memo-machine/library npm run dev
 ```
 
-Recorder/emulator session ingestion currently accepts base64 WAVs in JSON with a default `32mb` request limit. Set `JSON_BODY_LIMIT` if local test payloads need more room:
+Recorder/emulator session ingestion prefers multipart WAV upload with a default `512mb` file limit. Set `AUDIO_UPLOAD_LIMIT_BYTES` if longer local recordings need more room:
+
+```bash
+AUDIO_UPLOAD_LIMIT_BYTES=1073741824 npm run dev
+```
+
+The compatibility JSON/base64 path still exists for small saved payloads and defaults to a `32mb` request limit. Set `JSON_BODY_LIMIT` if local test payloads need more room:
 
 ```bash
 JSON_BODY_LIMIT=64mb npm run dev

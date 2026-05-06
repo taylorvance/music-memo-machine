@@ -416,6 +416,15 @@ h3 {
   background: #3f4f51;
 }
 
+.waveform-empty {
+  position: absolute;
+  inset: 18px 10px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .selection {
   position: absolute;
   top: 0;

@@ -18,14 +18,14 @@ Current behavior:
 - Uses record/stop/bookmark buttons.
 - Shows a virtual status light for idle, arming, recording, ready to sync, syncing, synced, and failed states.
 - Encodes the captured microphone audio as a WAV in the browser.
-- Submits through `POST /api/ingest/sessions`.
+- Submits the WAV and metadata as multipart form data through `POST /api/ingest/sessions`.
 - Refreshes the library after sync and provides a direct review action.
 
 Browser microphone access requires a secure context. Localhost works for normal development.
 
 ## CLI Harness
 
-The CLI harness remains useful for deterministic sync tests, payload replay, and duplicate acknowledgement checks.
+The CLI harness remains useful for deterministic sync tests, payload replay, and duplicate acknowledgement checks. Generated or replayed sessions are submitted to the manager as multipart form data. Saved payload files remain JSON/base64 so they can be inspected and replayed.
 
 Generate and submit a short fake recording:
 

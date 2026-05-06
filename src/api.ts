@@ -2,6 +2,7 @@ import type {
   Clip,
   CompressionState,
   IngestSessionInput,
+  IngestSessionMetadataInput,
   IngestSessionResult,
   RetentionClass,
   Session,
@@ -13,11 +14,14 @@ import type {
 } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
+  const isFormData = options?.body instanceof FormData;
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers: isFormData
+      ? options?.headers
+      : {
+          'Content-Type': 'application/json',
+          ...options?.headers,
+        },
     ...options,
   });
 
@@ -37,6 +41,20 @@ export function ingestSession(input: IngestSessionInput) {
   return request<IngestSessionResult>('/api/ingest/sessions', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function ingestSessionMultipart(
+  metadata: IngestSessionMetadataInput,
+  audio: Blob,
+) {
+  const form = new FormData();
+  form.append('metadata', JSON.stringify(metadata));
+  form.append('audio', audio, 'source.wav');
+
+  return request<IngestSessionResult>('/api/ingest/sessions', {
+    method: 'POST',
+    body: form,
   });
 }
 

@@ -99,6 +99,8 @@ export interface IngestSessionInput {
   }>;
 }
 
+export type IngestSessionMetadataInput = Omit<IngestSessionInput, 'audio'>;
+
 export interface IngestSessionResult {
   acknowledged: boolean;
   duplicate: boolean;

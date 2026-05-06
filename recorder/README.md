@@ -2,8 +2,8 @@
 
 This package contains the Raspberry Pi recorder service. It is intentionally
 small and testable without Pi hardware: GPIO and audio capture are adapters,
-while session IDs, spool state, payload creation, and manager sync are plain
-Python.
+while session IDs, spool state, multipart manager sync, and compatibility
+payload creation are plain Python.
 
 Run the local tests from the repo root:
 

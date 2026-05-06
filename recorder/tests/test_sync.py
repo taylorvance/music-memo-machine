@@ -4,17 +4,22 @@ import unittest
 
 from music_memo_recorder.config import load_config
 from music_memo_recorder.spool import RecorderSpool
-from music_memo_recorder.sync import SyncHTTPError, SyncNetworkError, sync_ready_sessions
+from music_memo_recorder.sync import (
+    SyncHTTPError,
+    SyncNetworkError,
+    multipart_body,
+    sync_ready_sessions,
+)
 from music_memo_recorder.wav import make_sine_wav
 
 
 class FakeClient:
     def __init__(self, responses):
         self.responses = list(responses)
-        self.payloads = []
+        self.posts = []
 
-    def post_session(self, payload):
-        self.payloads.append(payload)
+    def post_session(self, metadata, audio_path):
+        self.posts.append((metadata, audio_path))
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -55,7 +60,28 @@ class SyncTests(unittest.TestCase):
 
             self.assertEqual(outcomes[0].status, "synced")
             self.assertTrue((Path(temp_dir) / "synced" / "sync-test-001").exists())
-            self.assertEqual(client.payloads[0]["id"], "sync-test-001")
+            self.assertEqual(client.posts[0][0]["id"], "sync-test-001")
+            self.assertTrue(client.posts[0][1].name.endswith(".wav"))
+
+    def test_multipart_body_streams_metadata_and_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audio_path = Path(temp_dir) / "source.wav"
+            audio = make_sine_wav(0.25)
+            audio_path.write_bytes(audio)
+            metadata = {
+                "id": "stream-test-001",
+                "created_at": "2026-05-05T12:00:00Z",
+                "bookmarks": [],
+            }
+
+            body, content_length = multipart_body(metadata, audio_path, "test-boundary")
+            payload = b"".join(body)
+
+            self.assertEqual(content_length, len(payload))
+            self.assertIn(b'name="metadata"', payload)
+            self.assertIn(b'"id":"stream-test-001"', payload)
+            self.assertIn(b'name="audio"; filename="source.wav"', payload)
+            self.assertIn(audio, payload)
 
     def test_conflict_moves_session_out_of_retry_queue(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -18,7 +18,7 @@ The management/review prototype exists:
 - Review UI with waveform, bookmarks, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
 - Browser recorder emulator with microphone capture, record/stop/bookmark controls, a virtual status light, WAV encoding, and manager sync.
 - Express API with SQLite metadata plus sidecar JSON files.
-- Manager ingestion endpoint for complete recorder/emulator WAV session imports with idempotent acknowledgement.
+- Manager ingestion endpoint for complete recorder/emulator WAV session imports with multipart upload, idempotent acknowledgement, and manager-generated waveform caches.
 - CLI recorder test harness that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
 - Python Pi recorder service with mock and `arecord` audio adapters, optional `gpiozero` button/LED wiring, local spool state, idempotent sync retries, and unit tests.
 - Initial Pi bootstrap/service installer scripts plus a systemd unit template.
@@ -32,8 +32,9 @@ The recorder side now has a testable first implementation. Hardware smoke testin
 1. Keep the management app useful as the canonical review target.
    - Stabilize the session and clip metadata contract.
    - Make library paths and production startup predictable.
-   - Keep the JSON/base64 import endpoint aligned with `docs/ingestion.md`.
-   - Add multipart upload or a spool watcher if longer recordings outgrow JSON import.
+   - Keep the multipart import endpoint aligned with `docs/ingestion.md`.
+   - Keep JSON/base64 import as a small-payload compatibility path only.
+   - Add a spool watcher if later deployments need direct filesystem import.
    - Keep tests around metadata persistence, trimming, trash, and storage safety.
 
 2. Use the recorder emulator to harden recorder-to-manager behavior.
@@ -66,7 +67,7 @@ The recorder side now has a testable first implementation. Hardware smoke testin
 
 ## Open Decisions
 
-- When to replace or supplement JSON/base64 ingestion with multipart upload, spool directory import, rsync-style sync, or a hybrid.
+- Whether multipart ingest is enough for deployed recorders or should be supplemented with spool-directory import, rsync-style sync, or a hybrid.
 - Whether the manager runs primarily on a Mac mini, a Pi, or either.
 - Whether the first `arecord` capture path is enough or should move to a richer ALSA/PipeWire/Python audio stack.
 - Node version target for Pi deployment.

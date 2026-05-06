@@ -391,6 +391,13 @@ function payloadAudio(payload) {
   return Buffer.from(value, 'base64');
 }
 
+function payloadMetadata(payload) {
+  const metadata = { ...payload };
+  delete metadata.audio;
+  delete metadata.audio_base64;
+  return metadata;
+}
+
 function bookmarkCreatedAt(recordingStartedAt, timestampSeconds) {
   return new Date(
     recordingStartedAt.getTime() + timestampSeconds * 1000,
@@ -473,12 +480,17 @@ async function parseResponseBody(response) {
 }
 
 async function postPayload(managerUrl, payload) {
+  const form = new FormData();
+  form.append('metadata', JSON.stringify(payloadMetadata(payload)));
+  form.append(
+    'audio',
+    new Blob([payloadAudio(payload)], { type: 'audio/wav' }),
+    'source.wav',
+  );
+
   const response = await fetch(ingestUrl(managerUrl), {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+    body: form,
   });
   const body = await parseResponseBody(response);
   if (!response.ok) {

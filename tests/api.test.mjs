@@ -58,11 +58,15 @@ function close(serverInstance) {
 }
 
 async function request(pathname, options = {}) {
+  const headers =
+    options.body instanceof FormData
+      ? options.headers
+      : {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        };
   const response = await fetch(`${baseUrl}${pathname}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
     ...options,
   });
   const body = await response.json();
@@ -254,6 +258,10 @@ test('recorder ingestion writes session audio, sidecar, and SQLite metadata', as
   assert.equal(body.session.channel_count, 1);
   assert.equal(body.session.source_size_bytes, wav.length);
   assert.equal(body.session.actual_source_size_bytes, wav.length);
+  assert.equal(body.session.waveform.session_id, 'ingest-test-001');
+  assert.equal(body.session.waveform.source, 'manager_wav_peak_v1');
+  assert.ok(body.session.waveform.peaks.length >= 180);
+  assert.ok(Math.max(...body.session.waveform.peaks) > 0.45);
   assert.equal(
     body.session.audio_url,
     '/media/sessions/ingest-test-001/source.wav',
@@ -278,6 +286,11 @@ test('recorder ingestion writes session audio, sidecar, and SQLite metadata', as
   assert.equal(sessionJson.audio_path, 'source.wav');
   assert.equal(sessionJson.storage_size_bytes, wav.length);
   assert.equal('audio_url' in sessionJson, false);
+  const waveformJson = await readJson(
+    path.join(libraryRoot, 'cache', 'waveforms', 'ingest-test-001.json'),
+  );
+  assert.equal(waveformJson.source, 'manager_wav_peak_v1');
+  assert.deepEqual(waveformJson.peaks, body.session.waveform.peaks);
 
   const db = new DatabaseSync(path.join(libraryRoot, 'metadata.sqlite'));
   try {
@@ -299,6 +312,57 @@ test('recorder ingestion writes session audio, sidecar, and SQLite metadata', as
   } finally {
     db.close();
   }
+});
+
+test('multipart recorder ingestion streams audio and writes waveform cache', async () => {
+  const wav = makeTestWav({
+    durationSeconds: 2.4,
+    sampleRate: 8000,
+    channelCount: 2,
+    frequency: 262,
+  });
+  const metadata = {
+    id: 'ingest-multipart-001',
+    device_name: 'pi recorder',
+    created_at: '2026-05-05T14:00:00.000Z',
+    title: 'Multipart take',
+    notes: 'Uploaded as file data',
+    bookmarks: [
+      {
+        timestamp_seconds: 1.2,
+        note: 'Middle',
+      },
+    ],
+  };
+  const form = new FormData();
+  form.append('metadata', JSON.stringify(metadata));
+  form.append('audio', new Blob([wav], { type: 'audio/wav' }), 'source.wav');
+
+  const { response, body } = await request('/api/ingest/sessions', {
+    method: 'POST',
+    body: form,
+  });
+
+  assert.equal(response.status, 201);
+  assert.equal(body.acknowledged, true);
+  assert.equal(body.session.id, 'ingest-multipart-001');
+  assert.equal(body.session.duration_seconds, 2.4);
+  assert.equal(body.session.channel_count, 2);
+  assert.equal(body.session.source_size_bytes, wav.length);
+  assert.equal(body.session.waveform.source, 'manager_wav_peak_v1');
+  assert.ok(body.session.waveform.peaks.length >= 180);
+  assert.ok(Math.max(...body.session.waveform.peaks) > 0.45);
+
+  const audioPath = path.join(
+    libraryRoot,
+    'sessions',
+    'ingest-multipart-001',
+    'source.wav',
+  );
+  assert.equal((await fs.readFile(audioPath)).equals(wav), true);
+  await fs.access(
+    path.join(libraryRoot, 'cache', 'waveforms', 'ingest-multipart-001.json'),
+  );
 });
 
 test('recorder ingestion is idempotent for exact retries and rejects conflicting audio', async () => {

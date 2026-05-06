@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMetadataStore } from '../server/metadata-store.js';
+import { generateWaveformFromWavBuffer } from '../server/waveform.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -285,18 +286,6 @@ function makeWav(duration, pattern) {
   return buffer;
 }
 
-function waveformPeaks(duration, pattern, bucketCount = 180) {
-  return Array.from({ length: bucketCount }, (_, index) => {
-    const t = (duration * index) / bucketCount;
-    const samples = [0, 0.18, 0.36, 0.54, 0.72].map((offset) =>
-      Math.abs(sampleAt(t + offset, duration, pattern)),
-    );
-    return Number(
-      Math.max(0.02, Math.min(1, Math.max(...samples) * 6)).toFixed(3),
-    );
-  });
-}
-
 function sliceWav(source, startSeconds, endSeconds) {
   const startByte = 44 + Math.floor(startSeconds * bytesPerSecond);
   const endByte = 44 + Math.floor(endSeconds * bytesPerSecond);
@@ -349,13 +338,7 @@ async function main() {
     });
     await writeJson(
       path.join(libraryRoot, 'cache', 'waveforms', `${fixture.id}.json`),
-      {
-        session_id: fixture.id,
-        generated_at: '2026-05-02T22:00:00-05:00',
-        source: 'fixture_synth',
-        bucket_count: 180,
-        peaks: waveformPeaks(fixture.duration_seconds, fixture.pattern),
-      },
+      generateWaveformFromWavBuffer(wav, fixture.id),
     );
   }
 

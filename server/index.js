@@ -1,8 +1,19 @@
 import express from 'express';
+import Busboy from 'busboy';
+import { randomUUID } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { createMetadataStore } from './metadata-store.js';
+import {
+  findWavChunk,
+  generateWaveformFromWavBuffer,
+  generateWaveformFromWavFile,
+  readWavFileInfo,
+  readWavInfo,
+} from './waveform.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -13,6 +24,9 @@ const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || '127.0.0.1';
 const trashRetentionDays = Number(process.env.TRASH_RETENTION_DAYS || 14);
 const postTakeBookmarkGraceSeconds = 8;
+const multipartAudioLimitBytes = Number(
+  process.env.AUDIO_UPLOAD_LIMIT_BYTES || 512 * 1024 * 1024,
+);
 
 const app = express();
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '32mb' }));
@@ -66,6 +80,29 @@ async function loadWaveform(sessionId) {
   return readJson(filePath);
 }
 
+async function writeWaveform(sessionId, waveform) {
+  await writeJson(
+    path.join(libraryRoot, 'cache', 'waveforms', `${sessionId}.json`),
+    waveform,
+  );
+}
+
+async function loadOrCreateWaveform(session, sourcePath) {
+  const existing = await loadWaveform(session.id);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    const waveform = await generateWaveformFromWavFile(sourcePath, session.id);
+    await writeWaveform(session.id, waveform);
+    return waveform;
+  } catch (error) {
+    console.error(`Failed to generate waveform for ${session.id}`, error);
+    return null;
+  }
+}
+
 async function loadClip(clipId) {
   await ensureMetadataReady();
   const clip = store.loadClipMetadata(clipId);
@@ -106,7 +143,7 @@ async function enrichSession(session) {
     audio_url: `/media/sessions/${session.id}/${session.audio_path}`,
     source_size_bytes: session.storage_size_bytes || stat.size,
     actual_source_size_bytes: stat.size,
-    waveform: await loadWaveform(session.id),
+    waveform: await loadOrCreateWaveform(session, sourcePath),
     clip_details: clipDetails,
   };
 }
@@ -586,19 +623,6 @@ function createClipId() {
   return `clip-${stamp}-${random}`;
 }
 
-function findWavChunk(buffer, chunkId) {
-  let offset = 12;
-  while (offset + 8 <= buffer.length) {
-    const id = buffer.toString('ascii', offset, offset + 4);
-    const size = buffer.readUInt32LE(offset + 4);
-    if (id === chunkId) {
-      return { offset: offset + 8, size, sizeOffset: offset + 4 };
-    }
-    offset += 8 + size + (size % 2);
-  }
-  return null;
-}
-
 async function trimWavFile(sourcePath, targetPath, startSeconds, endSeconds) {
   const source = await fs.readFile(sourcePath);
   if (
@@ -680,33 +704,220 @@ function decodeBase64Audio(payload) {
   return Buffer.from(normalized, 'base64');
 }
 
-function readWavInfo(buffer) {
-  if (
-    buffer.length < 44 ||
-    buffer.toString('ascii', 0, 4) !== 'RIFF' ||
-    buffer.toString('ascii', 8, 12) !== 'WAVE'
-  ) {
-    throw httpError(400, 'Only WAV audio can be imported');
+async function fileEqualsBuffer(filePath, buffer) {
+  const stat = await fs.stat(filePath);
+  if (stat.size !== buffer.length) {
+    return false;
   }
 
-  const fmt = findWavChunk(buffer, 'fmt ');
-  const data = findWavChunk(buffer, 'data');
-  if (!fmt || !data) {
-    throw httpError(400, 'WAV audio is missing fmt or data chunks');
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const chunkSize = 1024 * 1024;
+    let offset = 0;
+    while (offset < buffer.length) {
+      const nextSize = Math.min(chunkSize, buffer.length - offset);
+      const chunk = Buffer.alloc(nextSize);
+      const { bytesRead } = await handle.read(chunk, 0, nextSize, offset);
+      if (
+        bytesRead !== nextSize ||
+        !chunk.equals(buffer.subarray(offset, offset + nextSize))
+      ) {
+        return false;
+      }
+      offset += nextSize;
+    }
+    return true;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function filesEqual(leftPath, rightPath) {
+  const [leftStat, rightStat] = await Promise.all([
+    fs.stat(leftPath),
+    fs.stat(rightPath),
+  ]);
+  if (leftStat.size !== rightStat.size) {
+    return false;
   }
 
-  const channelCount = buffer.readUInt16LE(fmt.offset + 2);
-  const sampleRate = buffer.readUInt32LE(fmt.offset + 4);
-  const byteRate = buffer.readUInt32LE(fmt.offset + 8);
-  if (channelCount < 1 || sampleRate < 1 || byteRate < 1 || data.size < 1) {
-    throw httpError(400, 'WAV audio has invalid stream metadata');
+  const [leftHandle, rightHandle] = await Promise.all([
+    fs.open(leftPath, 'r'),
+    fs.open(rightPath, 'r'),
+  ]);
+  try {
+    const chunkSize = 1024 * 1024;
+    let offset = 0;
+    while (offset < leftStat.size) {
+      const nextSize = Math.min(chunkSize, leftStat.size - offset);
+      const leftChunk = Buffer.alloc(nextSize);
+      const rightChunk = Buffer.alloc(nextSize);
+      const [leftRead, rightRead] = await Promise.all([
+        leftHandle.read(leftChunk, 0, nextSize, offset),
+        rightHandle.read(rightChunk, 0, nextSize, offset),
+      ]);
+      if (
+        leftRead.bytesRead !== nextSize ||
+        rightRead.bytesRead !== nextSize ||
+        !leftChunk.equals(rightChunk)
+      ) {
+        return false;
+      }
+      offset += nextSize;
+    }
+    return true;
+  } finally {
+    await Promise.all([leftHandle.close(), rightHandle.close()]);
   }
+}
 
+function bufferAudioSource(buffer) {
   return {
-    duration_seconds: Number((data.size / byteRate).toFixed(3)),
-    sample_rate: sampleRate,
-    channel_count: channelCount,
+    byteLength: buffer.length,
+    readInfo() {
+      return readWavInfo(buffer);
+    },
+    equalsFile(filePath) {
+      return fileEqualsBuffer(filePath, buffer);
+    },
+    persist(targetPath) {
+      return fs.writeFile(targetPath, buffer);
+    },
+    generateWaveform(sessionId) {
+      return generateWaveformFromWavBuffer(buffer, sessionId);
+    },
   };
+}
+
+async function fileAudioSource(filePath) {
+  const stat = await fs.stat(filePath);
+  return {
+    byteLength: stat.size,
+    readInfo() {
+      return readWavFileInfo(filePath);
+    },
+    equalsFile(existingPath) {
+      return filesEqual(filePath, existingPath);
+    },
+    persist(targetPath) {
+      return fs.rename(filePath, targetPath);
+    },
+    generateWaveform(sessionId) {
+      return generateWaveformFromWavFile(filePath, sessionId);
+    },
+  };
+}
+
+function multipartPayloadFromFields(fields) {
+  if (!fields.metadata) {
+    throw httpError(400, 'multipart metadata field is required');
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(fields.metadata);
+  } catch {
+    throw httpError(400, 'multipart metadata field must be valid JSON');
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw httpError(400, 'multipart metadata field must be a JSON object');
+  }
+  return payload;
+}
+
+function readMultipartRequest(req, tempAudioPath) {
+  return new Promise((resolve, reject) => {
+    const fields = {};
+    let audioSeen = false;
+    let fileWrite = null;
+    let fileTooLarge = false;
+    let parseError = null;
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: {
+        fileSize: multipartAudioLimitBytes,
+        files: 1,
+        fieldSize: 64 * 1024,
+        fields: 20,
+      },
+    });
+
+    busboy.on('field', (name, value) => {
+      fields[name] = value;
+    });
+
+    busboy.on('file', (name, file) => {
+      if (name !== 'audio') {
+        parseError ||= httpError(
+          400,
+          'multipart audio file field must be named audio',
+        );
+        file.resume();
+        return;
+      }
+      if (audioSeen) {
+        parseError ||= httpError(400, 'multipart upload accepts one audio file');
+        file.resume();
+        return;
+      }
+
+      audioSeen = true;
+      file.on('limit', () => {
+        fileTooLarge = true;
+      });
+      fileWrite = pipeline(file, createWriteStream(tempAudioPath));
+    });
+
+    busboy.on('filesLimit', () => {
+      parseError ||= httpError(400, 'multipart upload accepts one audio file');
+    });
+    busboy.on('fieldsLimit', () => {
+      parseError ||= httpError(400, 'multipart upload has too many fields');
+    });
+    busboy.on('error', reject);
+    busboy.on('close', async () => {
+      try {
+        if (fileWrite) {
+          await fileWrite;
+        }
+        if (parseError) {
+          throw parseError;
+        }
+        if (fileTooLarge) {
+          throw httpError(413, 'audio upload exceeds AUDIO_UPLOAD_LIMIT_BYTES');
+        }
+        if (!audioSeen) {
+          throw httpError(400, 'multipart audio file is required');
+        }
+        resolve(multipartPayloadFromFields(fields));
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+async function multipartIngestParts(req) {
+  const tempDir = path.join(libraryRoot, 'tmp', 'ingest', randomUUID());
+  const tempAudioPath = path.join(tempDir, 'source.wav');
+  await fs.mkdir(tempDir, { recursive: true });
+
+  try {
+    const payload = await readMultipartRequest(req, tempAudioPath);
+    return {
+      payload,
+      audioSource: await fileAudioSource(tempAudioPath),
+      cleanup() {
+        return fs.rm(tempDir, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function normalizeImportedBookmarks(bookmarks, durationSeconds) {
@@ -761,7 +972,7 @@ function normalizeImportedBookmarks(bookmarks, durationSeconds) {
   });
 }
 
-async function ingestSession(payload) {
+async function ingestSessionFromAudio(payload, audioSource) {
   if (!payload || typeof payload !== 'object') {
     throw httpError(400, 'A session import payload is required');
   }
@@ -771,8 +982,7 @@ async function ingestSession(payload) {
     'session id',
   );
   const createdAt = validDateString(payload.created_at, 'created_at');
-  const audio = decodeBase64Audio(payload);
-  const wavInfo = readWavInfo(audio);
+  const wavInfo = await audioSource.readInfo();
   const bookmarks = normalizeImportedBookmarks(
     payload.bookmarks,
     wavInfo.duration_seconds,
@@ -786,8 +996,7 @@ async function ingestSession(payload) {
       existingSession.id,
       existingSession.audio_path,
     );
-    const existingAudio = await fs.readFile(existingAudioPath);
-    if (!existingAudio.equals(audio)) {
+    if (!(await audioSource.equalsFile(existingAudioPath))) {
       throw httpError(409, 'Session id already exists with different audio');
     }
     return {
@@ -810,6 +1019,7 @@ async function ingestSession(payload) {
   const hasBookmarks = bookmarks.some(
     (bookmark) => bookmark.state !== 'dismissed',
   );
+  const waveform = await audioSource.generateWaveform(sessionId);
   const session = {
     id: sessionId,
     created_at: createdAt,
@@ -825,14 +1035,15 @@ async function ingestSession(payload) {
       typeof payload.device_name === 'string' ? payload.device_name : undefined,
     sample_rate: wavInfo.sample_rate,
     channel_count: wavInfo.channel_count,
-    storage_size_bytes: audio.length,
+    storage_size_bytes: audioSource.byteLength,
     bookmarks,
     clips: [],
   };
 
   await fs.mkdir(sessionDir, { recursive: true });
-  await fs.writeFile(path.join(sessionDir, session.audio_path), audio);
+  await audioSource.persist(path.join(sessionDir, session.audio_path));
   await saveSession(session);
+  await writeWaveform(sessionId, waveform);
 
   return {
     acknowledged: true,
@@ -841,6 +1052,10 @@ async function ingestSession(payload) {
     session_id: sessionId,
     session: await loadSession(sessionId),
   };
+}
+
+function ingestJsonSession(payload) {
+  return ingestSessionFromAudio(payload, bufferAudioSource(decodeBase64Audio(payload)));
 }
 
 app.get('/api/health', async (_req, res, next) => {
@@ -860,7 +1075,21 @@ app.get('/api/health', async (_req, res, next) => {
 app.post('/api/ingest/sessions', async (req, res, next) => {
   try {
     await ensureMetadataReady();
-    const result = await ingestSession(req.body);
+    if (req.is('multipart/form-data')) {
+      const parts = await multipartIngestParts(req);
+      try {
+        const result = await ingestSessionFromAudio(
+          parts.payload,
+          parts.audioSource,
+        );
+        res.status(result.imported ? 201 : 200).json(result);
+      } finally {
+        await parts.cleanup();
+      }
+      return;
+    }
+
+    const result = await ingestJsonSession(req.body);
     res.status(result.imported ? 201 : 200).json(result);
   } catch (error) {
     next(error);

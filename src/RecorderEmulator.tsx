@@ -8,7 +8,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ingestSession } from './api';
+import { ingestSessionMultipart } from './api';
 
 type EmulatorStatus =
   | 'idle'
@@ -119,18 +119,6 @@ function mergeChunks(chunks: Float32Array[]) {
     offset += chunk.length;
   }
   return merged;
-}
-
-async function blobToBase64(blob: Blob) {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 8192;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    const chunk = bytes.subarray(offset, offset + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return window.btoa(binary);
 }
 
 function audioContextConstructor() {
@@ -334,23 +322,23 @@ export function RecorderEmulator({
     setStatus('syncing');
     try {
       const createdAt = recording.createdAt;
-      const result = await ingestSession({
-        id: recording.sessionId,
-        device_name: deviceName,
-        created_at: createdAt,
-        title,
-        notes,
-        audio: {
-          data_base64: await blobToBase64(recording.wav),
+      const result = await ingestSessionMultipart(
+        {
+          id: recording.sessionId,
+          device_name: deviceName,
+          created_at: createdAt,
+          title,
+          notes,
+          bookmarks: bookmarks.map((bookmark) => ({
+            ...bookmark,
+            timestamp_seconds: Math.min(
+              bookmark.timestamp_seconds,
+              recording.durationSeconds,
+            ),
+          })),
         },
-        bookmarks: bookmarks.map((bookmark) => ({
-          ...bookmark,
-          timestamp_seconds: Math.min(
-            bookmark.timestamp_seconds,
-            recording.durationSeconds,
-          ),
-        })),
-      });
+        recording.wav,
+      );
       setLastSessionId(result.session_id);
       setStatus('synced');
       await onSessionImported(result.session_id);
