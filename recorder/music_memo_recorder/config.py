@@ -17,6 +17,7 @@ class RecorderConfig:
     sync_attempts: int
     retry_delay_seconds: float
     sync_interval_seconds: float
+    status_visibility_seconds: float
     delete_after_ack: bool
     record_button_pin: int
     bookmark_button_pin: int
@@ -65,6 +66,9 @@ def load_config(env: dict[str, str] | None = None) -> RecorderConfig:
         sync_attempts=_env_int(source, "RECORDER_SYNC_ATTEMPTS", 3),
         retry_delay_seconds=_env_float(source, "RECORDER_RETRY_DELAY_SECONDS", 2.0),
         sync_interval_seconds=_env_float(source, "RECORDER_SYNC_INTERVAL_SECONDS", 30.0),
+        status_visibility_seconds=_env_float(
+            source, "RECORDER_STATUS_VISIBILITY_SECONDS", 30.0
+        ),
         delete_after_ack=_env_bool(source, "RECORDER_DELETE_AFTER_ACK", False),
         record_button_pin=_env_int(source, "RECORDER_RECORD_BUTTON_PIN", 17),
         bookmark_button_pin=_env_int(source, "RECORDER_BOOKMARK_BUTTON_PIN", 27),

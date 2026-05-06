@@ -101,6 +101,7 @@ DEVICE_NAME=music-memo-recorder-1
 RECORDER_AUDIO_BACKEND=arecord
 RECORDER_GPIO_BACKEND=gpiozero
 RECORDER_SYNC_INTERVAL_SECONDS=30
+RECORDER_STATUS_VISIBILITY_SECONDS=30
 RECORDER_DELETE_AFTER_ACK=false
 RECORDER_RECORD_BUTTON_PIN=17
 RECORDER_BOOKMARK_BUTTON_PIN=27
@@ -111,6 +112,8 @@ Current responsibilities:
 
 - Own microphone capture through `arecord`.
 - Own GPIO button and LED state through `gpiozero`.
+- Wake the status LED on button activity and restore the underlying semantic
+  state after the configurable visibility timeout.
 - Write complete session artifacts locally before attempting sync.
 - Retry `POST /api/ingest/sessions` safely until the manager acknowledges import or an exact duplicate.
 - Track manager acknowledgement.
@@ -130,7 +133,10 @@ The browser emulator is available from the web app top navigation. It gives the 
 Current behavior:
 
 - Record from the browser microphone.
-- Use record/stop/bookmark controls and a virtual status light.
+- Use record/stop/bookmark controls, virtual red/blue status LEDs, and
+  automatic post-recording sync.
+- Pressing bookmark while idle only wakes the status LEDs; it does not create
+  a bookmark unless recording is already active.
 - Encode the captured audio as WAV.
 - Submit that session through `POST /api/ingest/sessions`.
 - Jump directly into review after manager acknowledgement.

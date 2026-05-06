@@ -16,7 +16,7 @@ The management/review prototype exists:
 
 - Fixture-backed sessions and clips.
 - Review UI with session timeline, waveform, bookmarks, keyboard transport, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
-- Browser recorder emulator with microphone capture, record/stop/bookmark controls, scoped record/bookmark hotkeys, a virtual status light, WAV encoding, and manager sync.
+- Browser recorder emulator with microphone capture, record/stop/bookmark controls, scoped record/bookmark hotkeys, virtual red/blue status LEDs, WAV encoding, and automatic manager sync.
 - Express API with SQLite metadata plus sidecar JSON files.
 - Manager ingestion endpoint for complete recorder/emulator WAV session imports with multipart upload, idempotent acknowledgement, and manager-generated waveform caches.
 - CLI recorder test harness that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
@@ -38,7 +38,11 @@ The recorder side now has a testable first implementation. Hardware smoke testin
    - Keep tests around metadata persistence, trimming, trash, and storage safety.
 
 2. Use the recorder emulator to harden recorder-to-manager behavior.
-   - Keep the web emulator close to the planned hardware flow: record, bookmark, status light, sync, then review.
+   - Keep the web emulator close to the planned hardware flow: record,
+     bookmark, automatic sync, two-channel status lights, then review.
+   - Model status as current recorder/sync state plus a configurable visibility
+     timer. The blue light can stay bright while active; the timeout handles
+     the idle state.
    - Keep the CLI harness intentionally small for repeatable sync/idempotency scenarios.
    - Add scenarios only when they clarify the real recorder contract.
    - Use saved payload replay and `--submit-count 2` in the CLI harness to test sync retry and idempotency behavior.
@@ -50,7 +54,12 @@ The recorder side now has a testable first implementation. Hardware smoke testin
    - Use Tailscale or another private network so the manager and recorder can reach each other reliably.
 
 4. Harden the real recorder app.
-   - Hardware smoke-test record/stop, bookmark, and LED behavior on the selected Pi.
+   - Hardware smoke-test record/stop, bookmark, red recording LED, and optional
+     blue sync/server LED behavior on the selected Pi.
+   - Keep status lights honest while visible: red for capture, blue for
+     sync/server state, with a default 30-second configurable visibility timeout
+     only after recording stops and button activity has gone quiet. Active blue
+     can be bright; the timeout is what keeps idle glare out of the way.
    - Confirm `arecord` device selection and sample format with the real microphone.
    - Add silence auto-stop.
    - Add a storage-aware policy for deleting acknowledged local audio.
@@ -73,4 +82,3 @@ The recorder side now has a testable first implementation. Hardware smoke testin
 - Node version target for Pi deployment.
 - How much metadata the recorder owns before manager acknowledgement.
 - Whether the browser emulator should add silence auto-stop before hardware work.
-- Whether the browser emulator sync flow should remain explicit or switch to automatic sync after recording stops.

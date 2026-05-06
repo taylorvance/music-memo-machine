@@ -15,10 +15,16 @@ Open the Vite URL, usually `http://127.0.0.1:5173`, then choose `Emulator` in th
 Current behavior:
 
 - Captures audio from the browser microphone.
-- Uses record/stop/bookmark buttons.
-- Shows a virtual status light for idle, arming, recording, ready to sync, syncing, synced, and failed states.
+- Uses icon-only record/stop/bookmark buttons that feel closer to hardware.
+- Shows virtual red and blue status LEDs that follow the planned hardware
+  contract: red for recording/failure bursts, blue for sync/server state.
+  The blue light stays bright while the recorder is active, then sleeps after
+  the visibility timeout so idle glare does not carry the signal.
+- Pressing bookmark while idle only wakes the status LEDs; it does not create
+  a bookmark unless recording is already active.
 - Encodes the captured microphone audio as a WAV in the browser.
-- Submits the WAV and metadata as multipart form data through `POST /api/ingest/sessions`.
+- Automatically submits the WAV and metadata as multipart form data through
+  `POST /api/ingest/sessions` after recording stops.
 - Refreshes the library after sync and provides a direct review action.
 
 Browser microphone access requires a secure context. Localhost works for normal development.

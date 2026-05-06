@@ -28,6 +28,7 @@ On a Pi, the systemd service should run with:
 ```bash
 RECORDER_AUDIO_BACKEND=arecord
 RECORDER_GPIO_BACKEND=gpiozero
+RECORDER_STATUS_VISIBILITY_SECONDS=30
 ```
 
 See `docs/deployment.md` for bootstrap and service installation details.

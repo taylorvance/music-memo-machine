@@ -3,9 +3,6 @@ import {
   Check,
   Mic,
   Radio,
-  RotateCcw,
-  Square,
-  Upload,
 } from 'lucide-react';
 import { useShortcutRegistry } from '@taylorvance/tv-shared-web/shortcuts';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -15,10 +12,13 @@ type EmulatorStatus =
   | 'idle'
   | 'arming'
   | 'recording'
-  | 'ready'
   | 'syncing'
   | 'synced'
   | 'failed';
+
+type SyncStatus = 'unconfigured' | 'synced' | 'syncing' | 'unsynced';
+
+type RedStatus = 'off' | 'recording' | 'failed';
 
 type EmulatorBookmark = {
   id: string;
@@ -40,6 +40,7 @@ type RecordingResult = {
 type AudioContextConstructor = typeof AudioContext;
 
 const bufferSize = 4096;
+const statusVisibilitySeconds = 30;
 
 function cx(...values: Array<string | false | undefined>) {
   return values.filter(Boolean).join(' ');
@@ -53,6 +54,10 @@ function formatDuration(seconds: number) {
 
 function roundSeconds(seconds: number) {
   return Number(seconds.toFixed(2));
+}
+
+function monotonicNow() {
+  return performance.now();
 }
 
 function safeIdSegment(value: string) {
@@ -130,23 +135,45 @@ function audioContextConstructor() {
   );
 }
 
-function statusLabel(status: EmulatorStatus) {
+function syncStatusLabel(status: SyncStatus) {
   switch (status) {
-    case 'arming':
-      return 'Arming';
-    case 'recording':
-      return 'Recording';
-    case 'ready':
-      return 'Ready to sync';
-    case 'syncing':
-      return 'Syncing';
     case 'synced':
       return 'Synced';
-    case 'failed':
-      return 'Failed';
-    case 'idle':
+    case 'syncing':
+      return 'Syncing';
+    case 'unsynced':
+      return 'Unsynced';
+    case 'unconfigured':
     default:
-      return 'Idle';
+      return 'Sync off';
+  }
+}
+
+function redLightLabel(status: RedStatus, visible: boolean) {
+  if (!visible) return 'Asleep';
+  switch (status) {
+    case 'recording':
+      return 'Recording';
+    case 'failed':
+      return 'Error';
+    case 'off':
+    default:
+      return 'Off';
+  }
+}
+
+function blueLightLabel(status: SyncStatus, visible: boolean) {
+  if (!visible) return 'Asleep';
+  switch (status) {
+    case 'synced':
+      return 'Synced';
+    case 'syncing':
+      return 'Syncing';
+    case 'unsynced':
+      return 'Unsynced';
+    case 'unconfigured':
+    default:
+      return 'Sync off';
   }
 }
 
@@ -181,6 +208,12 @@ export function RecorderEmulator({
   onReviewSession: (sessionId: string) => void;
 }) {
   const [status, setStatus] = useState<EmulatorStatus>('idle');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
+  const [redStatus, setRedStatus] = useState<RedStatus>('off');
+  const [statusVisible, setStatusVisible] = useState(true);
+  const [pressedControl, setPressedControl] = useState<
+    'record' | 'bookmark' | null
+  >(null);
   const [deviceName, setDeviceName] = useState('web-recorder-emulator');
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
@@ -198,11 +231,42 @@ export function RecorderEmulator({
   const startedAtRef = useRef(0);
   const createdAtRef = useRef('');
   const timerRef = useRef<number | null>(null);
+  const bookmarksRef = useRef<EmulatorBookmark[]>([]);
+  const statusVisibilityTimerRef = useRef<number | null>(null);
+  const syncRetryTimerRef = useRef<number | null>(null);
+
+  const stopStatusVisibilityTimer = useCallback(() => {
+    if (statusVisibilityTimerRef.current !== null) {
+      window.clearTimeout(statusVisibilityTimerRef.current);
+      statusVisibilityTimerRef.current = null;
+    }
+  }, []);
+
+  const wakeStatusLights = useCallback(
+    (recordingIsActive: boolean) => {
+      stopStatusVisibilityTimer();
+      setStatusVisible(true);
+      if (!recordingIsActive) {
+        statusVisibilityTimerRef.current = window.setTimeout(() => {
+          setStatusVisible(false);
+          statusVisibilityTimerRef.current = null;
+        }, statusVisibilitySeconds * 1000);
+      }
+    },
+    [stopStatusVisibilityTimer],
+  );
 
   const stopTimer = useCallback(() => {
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+  }, []);
+
+  const stopSyncRetryTimer = useCallback(() => {
+    if (syncRetryTimerRef.current !== null) {
+      window.clearTimeout(syncRetryTimerRef.current);
+      syncRetryTimerRef.current = null;
     }
   }, []);
 
@@ -221,29 +285,102 @@ export function RecorderEmulator({
   useEffect(() => {
     return () => {
       stopCaptureNodes();
+      stopStatusVisibilityTimer();
+      stopSyncRetryTimer();
       if (recording?.audioUrl) {
         URL.revokeObjectURL(recording.audioUrl);
       }
     };
-  }, [recording?.audioUrl, stopCaptureNodes]);
+  }, [
+    recording?.audioUrl,
+    stopCaptureNodes,
+    stopStatusVisibilityTimer,
+    stopSyncRetryTimer,
+  ]);
+
+  useEffect(() => {
+    statusVisibilityTimerRef.current = window.setTimeout(() => {
+      setStatusVisible(false);
+      statusVisibilityTimerRef.current = null;
+    }, statusVisibilitySeconds * 1000);
+
+    return stopStatusVisibilityTimer;
+  }, [stopStatusVisibilityTimer]);
+
+  useEffect(() => {
+    if (redStatus !== 'failed') return undefined;
+
+    const failureTimer = window.setTimeout(() => {
+      setRedStatus(status === 'recording' ? 'recording' : 'off');
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(failureTimer);
+    };
+  }, [redStatus, status]);
+
+  useEffect(() => {
+    function clearPressedControl() {
+      setPressedControl(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.repeat || isEmulatorTextTarget(event)) return;
+      if (event.key.toLowerCase() === 'r') {
+        setPressedControl('record');
+      }
+      if (event.key.toLowerCase() === 'b') {
+        setPressedControl('bookmark');
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.key.toLowerCase() === 'r') {
+        setPressedControl((current) => (current === 'record' ? null : current));
+      }
+      if (event.key.toLowerCase() === 'b') {
+        setPressedControl((current) =>
+          current === 'bookmark' ? null : current,
+        );
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearPressedControl);
+    document.addEventListener('visibilitychange', clearPressedControl);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', clearPressedControl);
+      document.removeEventListener('visibilitychange', clearPressedControl);
+    };
+  }, []);
 
   async function startRecording() {
+    wakeStatusLights(true);
+    stopSyncRetryTimer();
     setError('');
     setStatus('arming');
+    setRedStatus('off');
     setRecording((current) => {
       if (current?.audioUrl) {
         URL.revokeObjectURL(current.audioUrl);
       }
       return null;
     });
+    bookmarksRef.current = [];
     setBookmarks([]);
     setLastSessionId('');
     setElapsedSeconds(0);
 
     const AudioContextClass = audioContextConstructor();
     if (!AudioContextClass || !navigator.mediaDevices?.getUserMedia) {
-      setStatus('failed');
+      setStatus('idle');
+      setRedStatus('failed');
       setError('Browser microphone recording is unavailable.');
+      wakeStatusLights(false);
       return;
     }
 
@@ -268,27 +405,31 @@ export function RecorderEmulator({
       sourceRef.current = source;
       processorRef.current = processor;
       streamRef.current = stream;
-      startedAtRef.current = performance.now();
+      startedAtRef.current = monotonicNow();
       createdAtRef.current = new Date().toISOString();
       timerRef.current = window.setInterval(() => {
         setElapsedSeconds(
-          roundSeconds((performance.now() - startedAtRef.current) / 1000),
+          roundSeconds((monotonicNow() - startedAtRef.current) / 1000),
         );
       }, 100);
       setStatus('recording');
+      setRedStatus('recording');
     } catch (caught) {
       stopCaptureNodes();
-      setStatus('failed');
+      setStatus('idle');
+      setRedStatus('failed');
       setError(
         caught instanceof Error
           ? caught.message
           : 'Microphone permission failed.',
       );
+      wakeStatusLights(false);
     }
   }
 
   function stopRecording() {
     if (status !== 'recording') return;
+    wakeStatusLights(false);
 
     const sampleRate = audioContextRef.current?.sampleRate || 48_000;
     stopCaptureNodes();
@@ -297,98 +438,100 @@ export function RecorderEmulator({
     const durationSeconds = roundSeconds(samples.length / sampleRate);
     const audioUrl = URL.createObjectURL(wav);
     const createdAt = createdAtRef.current || new Date().toISOString();
+    const nextRecording = {
+      sessionId: createSessionId(deviceName, createdAt),
+      wav,
+      audioUrl,
+      durationSeconds,
+      sampleRate,
+      createdAt,
+    };
 
     setElapsedSeconds(durationSeconds);
     setRecording((current) => {
       if (current?.audioUrl) {
         URL.revokeObjectURL(current.audioUrl);
       }
-      return {
-        sessionId: createSessionId(deviceName, createdAt),
-        wav,
-        audioUrl,
-        durationSeconds,
-        sampleRate,
-        createdAt,
-      };
+      return nextRecording;
     });
-    setStatus('ready');
+    setRedStatus('off');
+    setStatus('syncing');
+    stopSyncRetryTimer();
+    void syncRecording(nextRecording);
   }
 
   function addBookmark() {
+    wakeStatusLights(status === 'recording');
     if (status !== 'recording') return;
     const timestamp = roundSeconds(
-      (performance.now() - startedAtRef.current) / 1000,
+      (monotonicNow() - startedAtRef.current) / 1000,
     );
-    setBookmarks((current) => [
-      ...current,
-      {
-        id: `bookmark-${String(current.length + 1).padStart(3, '0')}`,
-        timestamp_seconds: timestamp,
-        created_at: new Date().toISOString(),
-        state: 'unresolved',
-        note: '',
-      },
-    ]);
+    setBookmarks((current) => {
+      const next = [
+        ...current,
+        {
+          id: `bookmark-${String(current.length + 1).padStart(3, '0')}`,
+          timestamp_seconds: timestamp,
+          created_at: new Date().toISOString(),
+          state: 'unresolved' as const,
+          note: '',
+        },
+      ];
+      bookmarksRef.current = next;
+      return next;
+    });
   }
 
-  function updateBookmarkNote(id: string, note: string) {
-    setBookmarks((current) =>
-      current.map((bookmark) =>
-        bookmark.id === id ? { ...bookmark, note } : bookmark,
-      ),
-    );
+  function importedBookmarks(durationSeconds: number) {
+    return bookmarksRef.current.map((bookmark) => ({
+      ...bookmark,
+      timestamp_seconds: Math.min(bookmark.timestamp_seconds, durationSeconds),
+    }));
   }
 
-  async function syncRecording() {
-    if (!recording) return;
+  function scheduleSyncRetry(recordingToSync: RecordingResult) {
+    stopSyncRetryTimer();
+    syncRetryTimerRef.current = window.setTimeout(() => {
+      syncRetryTimerRef.current = null;
+      void syncRecording(recordingToSync);
+    }, 10_000);
+  }
+
+  async function syncRecording(recordingToSync: RecordingResult) {
+    stopSyncRetryTimer();
     setError('');
+    setSyncStatus('syncing');
     setStatus('syncing');
+    wakeStatusLights(false);
     try {
-      const createdAt = recording.createdAt;
+      const createdAt = recordingToSync.createdAt;
       const result = await ingestSessionMultipart(
         {
-          id: recording.sessionId,
+          id: recordingToSync.sessionId,
           device_name: deviceName,
           created_at: createdAt,
           title,
           notes,
-          bookmarks: bookmarks.map((bookmark) => ({
-            ...bookmark,
-            timestamp_seconds: Math.min(
-              bookmark.timestamp_seconds,
-              recording.durationSeconds,
-            ),
-          })),
+          bookmarks: importedBookmarks(recordingToSync.durationSeconds),
         },
-        recording.wav,
+        recordingToSync.wav,
       );
       setLastSessionId(result.session_id);
+      setSyncStatus('synced');
       setStatus('synced');
+      wakeStatusLights(false);
       await onSessionImported(result.session_id);
     } catch (caught) {
+      setSyncStatus('unsynced');
       setStatus('failed');
       setError(caught instanceof Error ? caught.message : 'Sync failed.');
+      scheduleSyncRetry(recordingToSync);
+      wakeStatusLights(false);
     }
   }
 
-  function reset() {
-    stopCaptureNodes();
-    setStatus('idle');
-    setElapsedSeconds(0);
-    setBookmarks([]);
-    setRecording((current) => {
-      if (current?.audioUrl) {
-        URL.revokeObjectURL(current.audioUrl);
-      }
-      return null;
-    });
-    setLastSessionId('');
-    setError('');
-  }
-
   const recordingActive = status === 'recording' || status === 'arming';
-  const canSync = status === 'ready' || status === 'failed';
+  const hasPendingSync = Boolean(recording) && syncStatus !== 'synced';
   const { ref: emulatorShortcutRef } = useShortcutRegistry<HTMLElement>(
     [
       {
@@ -400,7 +543,7 @@ export function RecorderEmulator({
             stopRecording();
             return;
           }
-          if (!recordingActive && status !== 'syncing') {
+          if (!recordingActive && status !== 'syncing' && !hasPendingSync) {
             void startRecording();
           }
         },
@@ -434,88 +577,96 @@ export function RecorderEmulator({
     >
       <div className="emulator-board">
         <div className="emulator-status-strip">
-          <div
-            className={cx('status-light', status)}
-            aria-label={`Recorder status: ${statusLabel(status)}`}
-          />
-          <strong>{statusLabel(status)}</strong>
-          <span>{formatDuration(elapsedSeconds)}</span>
+          <div className="status-indicators" aria-label="Status lights">
+            <div className="status-indicator">
+              <div
+                className={cx(
+                  'status-light red',
+                  statusVisible && redStatus,
+                  !statusVisible && 'sleeping',
+                )}
+                aria-label={`Red recording LED: ${
+                  statusVisible ? redStatus : 'sleeping'
+                }`}
+              />
+              <span>
+                <b>Record</b>
+                <small>{redLightLabel(redStatus, statusVisible)}</small>
+                <small>{formatDuration(elapsedSeconds)}</small>
+              </span>
+            </div>
+            <div className="status-indicator">
+              <div
+                className={cx(
+                  'status-light blue',
+                  statusVisible && syncStatus,
+                  !statusVisible && 'sleeping',
+                )}
+                aria-label={`Blue sync LED: ${
+                  statusVisible ? syncStatusLabel(syncStatus) : 'sleeping'
+                }`}
+              />
+              <span>
+                <b>Sync</b>
+                <small>{blueLightLabel(syncStatus, statusVisible)}</small>
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="emulator-controls" aria-label="Recorder controls">
           {status === 'recording' ? (
             <button
-              className="record-control stop"
+              className={cx(
+                'record-control',
+                pressedControl === 'record' && 'pressed',
+              )}
               type="button"
               onClick={stopRecording}
-              title="Stop"
+              aria-label="Stop recording"
+              title="Stop recording"
             >
-              <Square size={28} />
-              Stop
+              <span className="emulator-button-icon">
+                <Mic size={24} />
+              </span>
             </button>
           ) : (
             <button
-              className="record-control"
+              className={cx(
+                'record-control',
+                pressedControl === 'record' && 'pressed',
+              )}
               type="button"
-              onClick={startRecording}
-              disabled={recordingActive || status === 'syncing'}
+              onClick={() => {
+                wakeStatusLights(recordingActive);
+                if (!recordingActive && status !== 'syncing' && !hasPendingSync) {
+                  void startRecording();
+                }
+              }}
+              aria-label="Record"
               title="Record"
             >
-              <Mic size={30} />
-              Record
+              <span className="emulator-button-icon">
+                <Mic size={24} />
+              </span>
             </button>
           )}
           <button
-            className="emulator-action"
+            className={cx(
+              'emulator-action',
+              pressedControl === 'bookmark' && 'pressed',
+            )}
             type="button"
             onClick={addBookmark}
-            disabled={status !== 'recording'}
+            aria-label="Bookmark"
             title="Bookmark"
           >
-            <Bookmark size={22} />
-            Bookmark
-          </button>
-          <button
-            className="emulator-action primary"
-            type="button"
-            onClick={syncRecording}
-            disabled={!canSync || !recording}
-            title="Sync"
-          >
-            <Upload size={22} />
-            Sync
-          </button>
-          <button
-            className="emulator-action"
-            type="button"
-            onClick={reset}
-            disabled={status === 'syncing'}
-            title="Reset"
-          >
-            <RotateCcw size={21} />
-            Reset
+            <span className="emulator-button-icon">
+              <Bookmark size={22} />
+            </span>
           </button>
         </div>
-
         {error ? <div className="emulator-error">{error}</div> : null}
-
-        {recording ? (
-          <div className="emulator-preview">
-            <audio controls src={recording.audioUrl} />
-            <div>
-              <span>{formatDuration(recording.durationSeconds)}</span>
-              <span>{recording.sampleRate} Hz WAV</span>
-            </div>
-          </div>
-        ) : (
-          <div className="emulator-meter" aria-hidden="true">
-            <span className={cx(status === 'recording' && 'active')} />
-            <span className={cx(status === 'recording' && 'active')} />
-            <span className={cx(status === 'recording' && 'active')} />
-            <span className={cx(status === 'recording' && 'active')} />
-            <span className={cx(status === 'recording' && 'active')} />
-          </div>
-        )}
       </div>
 
       <aside className="emulator-side">
@@ -556,14 +707,6 @@ export function RecorderEmulator({
               {bookmarks.map((bookmark) => (
                 <div className="emulator-bookmark-row" key={bookmark.id}>
                   <span>{formatDuration(bookmark.timestamp_seconds)}</span>
-                  <input
-                    aria-label={`Note for ${bookmark.id}`}
-                    value={bookmark.note}
-                    onChange={(event) =>
-                      updateBookmarkNote(bookmark.id, event.target.value)
-                    }
-                    placeholder="Note"
-                  />
                 </div>
               ))}
             </div>
@@ -572,20 +715,31 @@ export function RecorderEmulator({
           )}
         </section>
 
-        {lastSessionId ? (
+        {recording || lastSessionId ? (
           <section className="simple-panel emulator-synced">
-            <div>
-              <Check size={19} />
-              <strong>{lastSessionId}</strong>
-            </div>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => onReviewSession(lastSessionId)}
-            >
-              <Radio size={18} />
-              Review take
-            </button>
+            {recording ? (
+              <div className="emulator-preview">
+                <audio controls src={recording.audioUrl} />
+                <span>{formatDuration(recording.durationSeconds)}</span>
+                <span>{recording.sampleRate} Hz WAV</span>
+              </div>
+            ) : null}
+            {lastSessionId ? (
+              <>
+                <div>
+                  <Check size={19} />
+                  <strong>{lastSessionId}</strong>
+                </div>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => onReviewSession(lastSessionId)}
+                >
+                  <Radio size={18} />
+                  Review take
+                </button>
+              </>
+            ) : null}
           </section>
         ) : null}
       </aside>

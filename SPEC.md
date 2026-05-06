@@ -28,6 +28,7 @@ enough that the device can stay in regular use.
 - Start and stop recording with one physical button
 - Add timestamp bookmarks during recording with one physical button
 - Show recording state with an obvious red status LED
+- Show sync/server state with a quiet optional blue status LED
 - Auto-stop after a configurable long silence period
 - Store recordings locally on the device
 - Provide a phone/computer review UI with waveform, bookmarks, scrubbing, trim,
@@ -171,6 +172,7 @@ V1 controls:
 - record/stop toggle
 - bookmark
 - recording status LED
+- optional sync/server status LED
 
 The hardware should keep capture-time controls minimal. Review, rating,
 trimming, deletion, and organization belong in the web UI unless real use shows
@@ -181,10 +183,50 @@ Possible later controls:
 - undo last bookmark
 - keep/take rating
 - shutdown or sync via long-press
-- low-storage or sync status indicator
+- low-storage status indicator
 
 The undo/delete-bookmark button is intentionally not in v1. It could be useful,
 but it also adds a new way to make mistakes during a take.
+
+## Status Indicators
+
+Status lights should be honest while visible. They should represent the current
+recorder and sync state, not a history of the last event. Visibility is separate
+from state: the device may sleep quiet status lights after inactivity, but while
+the lights are awake they should show the current truth.
+
+The default inactivity timeout is 30 seconds and should be configurable. The
+timer starts only when the recorder is not recording. Button presses, recording
+start, recording stop, sync start, sync completion, sync failure, and boot should
+wake or extend the visibility window. Active recording is activity, so the blue
+sync/server light should not time out while the red recording light remains on.
+
+Red LED:
+
+- off: not recording
+- solid: actively recording
+- short blink burst after a failed record action: recording could not start or
+  failed immediately
+
+The red LED should not blink indefinitely for errors. If recording fails while
+unattended, the service should stop or refuse capture, give the short failure
+burst when visible, and return red to the underlying non-recording state.
+
+Blue LED, if present:
+
+- off: sync is disabled or no management server is configured
+- dim solid: management server is reachable and all completed sessions are
+  durably acknowledged
+- slow pulse: sync is currently transferring or awaiting acknowledgement
+- blink: one or more completed sessions are unsynced because sync cannot
+  complete right now
+
+Blue is intentionally quiet. Dim solid should use low brightness when hardware
+supports PWM. If dimming is not practical, a very brief periodic blink can stand
+in for the dim fully synced state while the visibility window is active. The
+management UI can later show detailed recorder health based on last contact and
+recorder-reported errors, but if the recorder cannot reach the manager, the
+device LED is the local source of truth until contact resumes.
 
 ## Bookmark Semantics
 
@@ -459,6 +501,7 @@ Recommended parts:
 - high-endurance 64 GB or larger microSD card, or USB storage if already handy
 - two momentary buttons: record/stop and bookmark
 - one prominent red recording LED with resistor
+- optional blue sync/server LED with dimming support if practical
 - simple breadboard or temporary enclosure
 
 Why Pi 4 first:
@@ -507,7 +550,8 @@ Controls and indicators:
 - record/stop momentary button
 - bookmark momentary button
 - red recording LED
-- optional later low-storage/sync status LED or terse display
+- optional blue sync/server LED
+- optional later low-storage display or terse status display
 
 Recorder software posture:
 

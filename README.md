@@ -7,7 +7,7 @@ This repo currently contains the management/review prototype, a browser-based re
 ## Current Status
 
 - React/Vite review UI for sessions, bookmarks, clips, trash, storage pressure simulation, and timeline transport hotkeys.
-- Browser recorder emulator with microphone capture, record/stop/bookmark controls, scoped record/bookmark hotkeys, a virtual status light, WAV encoding, and manager sync.
+- Browser recorder emulator with microphone capture, icon-only record/stop/bookmark controls, scoped record/bookmark hotkeys, virtual red/blue status LEDs, WAV encoding, and automatic manager sync.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
 - Manager-side multipart ingestion endpoint for recorder/emulator WAV imports, with JSON/base64 compatibility for small saved payloads.
 - CLI recorder test harness for generated WAV sessions, payload replay, and duplicate-submit testing.
@@ -140,7 +140,7 @@ Pi deployment helpers:
 The project is expected to split into three cooperating surfaces:
 
 - Management app: durable library, review UI, clipping, trash, storage policy, and sync acknowledgement.
-- Recorder app: Pi-side capture service with record/stop, bookmark, LED state, silence auto-stop, local spool, and safe sync to the manager.
+- Recorder app: Pi-side capture service with record/stop, bookmark, LED state, silence auto-stop, local spool, and safe automatic sync to the manager.
 - Recorder emulator: local test tool that produces recorder-like sessions without physical hardware, so sync and review workflows can be iterated quickly.
 
 See `docs/ROADMAP.md` and `docs/deployment.md` before making architecture or deployment changes.

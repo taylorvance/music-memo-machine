@@ -14,6 +14,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.audio_backend, "mock")
         self.assertEqual(config.gpio_backend, "mock")
         self.assertEqual(config.sync_interval_seconds, 30.0)
+        self.assertEqual(config.status_visibility_seconds, 30.0)
         self.assertFalse(config.delete_after_ack)
 
     def test_load_config_reads_pi_environment(self) -> None:
@@ -27,6 +28,7 @@ class ConfigTests(unittest.TestCase):
                 "RECORDER_SYNC_ATTEMPTS": "5",
                 "RECORDER_RETRY_DELAY_SECONDS": "0.25",
                 "RECORDER_SYNC_INTERVAL_SECONDS": "10",
+                "RECORDER_STATUS_VISIBILITY_SECONDS": "12.5",
                 "RECORDER_DELETE_AFTER_ACK": "true",
                 "RECORDER_RECORD_BUTTON_PIN": "5",
                 "RECORDER_BOOKMARK_BUTTON_PIN": "6",
@@ -44,6 +46,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sync_attempts, 5)
         self.assertEqual(config.retry_delay_seconds, 0.25)
         self.assertEqual(config.sync_interval_seconds, 10.0)
+        self.assertEqual(config.status_visibility_seconds, 12.5)
         self.assertTrue(config.delete_after_ack)
         self.assertEqual(config.record_button_pin, 5)
         self.assertEqual(config.bookmark_button_pin, 6)
