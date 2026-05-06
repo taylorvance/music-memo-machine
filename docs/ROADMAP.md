@@ -20,10 +20,12 @@ The management/review prototype exists:
 - Express API with SQLite metadata plus sidecar JSON files.
 - Manager ingestion endpoint for complete recorder/emulator WAV session imports with idempotent acknowledgement.
 - CLI recorder test harness that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
+- Python Pi recorder service with mock and `arecord` audio adapters, optional `gpiozero` button/LED wiring, local spool state, idempotent sync retries, and unit tests.
+- Initial Pi bootstrap/service installer scripts plus a systemd unit template.
 - Integration tests for important API behavior.
 - Shared `tv-shared` lint, formatting, TypeScript, and CI verification conventions.
 
-The recorder side does not exist yet. Real capture, GPIO controls, LED state, silence auto-stop, recorder-side sync retries, post-ack deletion, and deployment automation are still open.
+The recorder side now has a testable first implementation. Hardware smoke testing, exact pin/microphone validation, silence auto-stop, storage-aware post-ack deletion, and richer deployment health checks are still open.
 
 ## Near-Term Priorities
 
@@ -40,20 +42,18 @@ The recorder side does not exist yet. Real capture, GPIO controls, LED state, si
    - Add scenarios only when they clarify the real recorder contract.
    - Use saved payload replay and `--submit-count 2` in the CLI harness to test sync retry and idempotency behavior.
 
-3. Define and automate deployment.
-   - Add a fresh-device bootstrap script for a Raspberry Pi or similar host.
+3. Harden deployment automation.
+   - Validate `scripts/bootstrap-pi.sh` and `scripts/install-recorder-service.sh` on a fresh Raspberry Pi OS Lite image.
    - Add an iterative deploy script that pulls the repo, installs dependencies, builds, restarts services, and checks health.
    - Run the management app as a systemd service with data outside the git checkout.
    - Use Tailscale or another private network so the manager and recorder can reach each other reliably.
 
-4. Build the real recorder app after the ingestion contract is stable.
-   - Record/stop toggle.
-   - Bookmark button.
-   - Recording LED state.
-   - Local session spool.
-   - Silence auto-stop.
-   - Durable sync to the management app.
-   - Deletion only after manager acknowledgement.
+4. Harden the real recorder app.
+   - Hardware smoke-test record/stop, bookmark, and LED behavior on the selected Pi.
+   - Confirm `arecord` device selection and sample format with the real microphone.
+   - Add silence auto-stop.
+   - Add a storage-aware policy for deleting acknowledged local audio.
+   - Keep durable sync retries and conflict preservation covered by tests.
 
 ## Later Work
 
@@ -68,7 +68,7 @@ The recorder side does not exist yet. Real capture, GPIO controls, LED state, si
 
 - When to replace or supplement JSON/base64 ingestion with multipart upload, spool directory import, rsync-style sync, or a hybrid.
 - Whether the manager runs primarily on a Mac mini, a Pi, or either.
-- Audio capture stack for the Pi recorder.
+- Whether the first `arecord` capture path is enough or should move to a richer ALSA/PipeWire/Python audio stack.
 - Node version target for Pi deployment.
 - How much metadata the recorder owns before manager acknowledgement.
 - Whether the browser emulator should add silence auto-stop before hardware work.

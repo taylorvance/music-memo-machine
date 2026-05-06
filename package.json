@@ -16,7 +16,9 @@
     "reset": "node scripts/seed-fixtures.mjs",
     "seed": "node scripts/seed-fixtures.mjs",
     "emulator:cli": "node scripts/recorder-emulator.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "npm run test:node && npm run test:recorder",
+    "test:node": "node --test tests/*.test.mjs",
+    "test:recorder": "PYTHONPATH=recorder python3 -m unittest discover recorder/tests",
     "test:watch": "node --test --watch tests/*.test.mjs"
   },
   "simple-git-hooks": {

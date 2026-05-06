@@ -1,0 +1,19 @@
+[Unit]
+Description=Music Memo Machine recorder
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/music-memo-machine
+Environment=PYTHONPATH=/opt/music-memo-machine/recorder
+EnvironmentFile=/etc/music-memo-machine/recorder.env
+ExecStart=/usr/bin/python3 -m music_memo_recorder service --sync-at-start
+Restart=on-failure
+RestartSec=5
+User=musicmemo
+Group=musicmemo
+SupplementaryGroups=audio gpio
+
+[Install]
+WantedBy=multi-user.target

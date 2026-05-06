@@ -5,10 +5,10 @@ The deployment goal is repeatable iteration after a small amount of one-time dev
 ## Target Shape
 
 - Management app runs on a stable host, likely a Mac mini or Raspberry Pi, reachable over Tailscale or LAN.
-- Recorder app runs on a Raspberry Pi near the instrument.
+- Recorder app runs as a Python service on a Raspberry Pi near the instrument.
 - Recorder writes session audio and metadata to a local spool first.
 - Manager ingests complete session payloads through `POST /api/ingest/sessions` and durably acknowledges them.
-- Recorder deletes local copies only after the manager has acknowledged transfer and storage policy allows it.
+- Recorder keeps local copies by default. It can delete local audio only after the manager has acknowledged transfer, and a storage-aware deletion policy is still a later hardening step.
 
 ## One-Time Pi Setup
 
@@ -23,14 +23,14 @@ Use Raspberry Pi Imager for the first boot:
 After first boot:
 
 - Install Tailscale and join the tailnet.
-- Install Node.js, npm, git, and audio/GPIO system packages.
+- Install Node.js, npm, git, Python, and audio/GPIO system packages.
 - Clone `https://github.com/taylorvance/music-memo-machine.git` into a deploy-only checkout such as `/opt/music-memo-machine`.
 - Create persistent data directories outside the checkout:
   - `/var/lib/music-memo-machine/library`
   - `/var/lib/music-memo-machine/recorder-spool`
 - Create environment files under `/etc/music-memo-machine/`.
 
-This should become `scripts/bootstrap-pi.sh` once the exact package list is known.
+The initial version is `scripts/bootstrap-pi.sh`. It installs Node/npm, Python, `alsa-utils`, `python3-gpiozero`, `python3-lgpio`, creates the `musicmemo` service user, creates persistent directories, writes a starter recorder environment file, clones the repo, and installs the recorder service. Pass `--install-node-deps` if the same Pi also needs the Node manager dependencies installed during bootstrap.
 
 ## Management Service
 
@@ -86,22 +86,42 @@ This should become `scripts/deploy-pi.sh <host>` for the manager. A recorder dep
 
 ## Recorder Service
 
-The recorder service is not built yet. It should eventually run as its own systemd service and use a local spool directory:
+The recorder service lives in `recorder/` and runs as its own systemd service. The checked-in template is `systemd/music-memo-recorder.service`; install it with:
+
+```bash
+scripts/install-recorder-service.sh --install-dir /opt/music-memo-machine
+```
+
+The service uses a local spool directory and this environment shape:
 
 ```dotenv
 RECORDER_SPOOL_DIR=/var/lib/music-memo-machine/recorder-spool
 MANAGER_URL=http://music-memo-manager:3001
 DEVICE_NAME=music-memo-recorder-1
+RECORDER_AUDIO_BACKEND=arecord
+RECORDER_GPIO_BACKEND=gpiozero
+RECORDER_SYNC_INTERVAL_SECONDS=30
+RECORDER_DELETE_AFTER_ACK=false
+RECORDER_RECORD_BUTTON_PIN=17
+RECORDER_BOOKMARK_BUTTON_PIN=27
+RECORDER_LED_PIN=22
 ```
 
-Expected responsibilities:
+Current responsibilities:
 
-- Own microphone capture.
-- Own GPIO button and LED state.
+- Own microphone capture through `arecord`.
+- Own GPIO button and LED state through `gpiozero`.
 - Write complete session artifacts locally before attempting sync.
 - Retry `POST /api/ingest/sessions` safely until the manager acknowledges import or an exact duplicate.
 - Track manager acknowledgement.
-- Never delete unsynced or acknowledged-durable material accidentally.
+- Preserve conflicts and failed imports in the spool for inspection.
+- Never delete local audio before manager acknowledgement. By default, acknowledged audio is also kept unless `RECORDER_DELETE_AFTER_ACK=true`.
+
+Run the recorder unit tests without hardware:
+
+```bash
+npm run test:recorder
+```
 
 ## Recorder Emulator
 

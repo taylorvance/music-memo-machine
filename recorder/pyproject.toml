@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "music-memo-recorder"
+version = "0.1.0"
+description = "Raspberry Pi recorder service for Music Memo Machine"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+pi = ["gpiozero>=2.0"]
+
+[project.scripts]
+music-memo-recorder = "music_memo_recorder.cli:main"
+
+[tool.setuptools]
+packages = ["music_memo_recorder"]

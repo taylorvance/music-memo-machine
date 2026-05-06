@@ -2,7 +2,7 @@
 
 Music Memo Machine is a low-friction system for capturing rough music ideas and turning the useful parts into saved memos. The intended product is a small always-available recorder near an instrument, paired with a local web app for review, trimming, storage management, and cleanup.
 
-This repo currently contains the management/review prototype and a browser-based recorder emulator. The physical recorder, deployment scripts, and recorder sync lifecycle are still roadmap items.
+This repo currently contains the management/review prototype, a browser-based recorder emulator, and the first Python Raspberry Pi recorder service. The recorder service is testable without Pi hardware and uses adapters for GPIO and audio capture.
 
 ## Current Status
 
@@ -11,6 +11,8 @@ This repo currently contains the management/review prototype and a browser-based
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
 - Manager-side JSON ingestion endpoint for recorder/emulator session imports.
 - CLI recorder test harness for generated WAV sessions, payload replay, and duplicate-submit testing.
+- Python Pi recorder service with mock and `arecord` audio backends, optional `gpiozero` button/LED wiring, local spool state, sync retries, and unit tests.
+- Pi bootstrap/service installer scripts and a checked-in systemd unit template.
 - Local library layout with session WAVs, clip WAVs, waveform caches, JSON sidecars, and SQLite metadata.
 - Fixture generator for realistic prototype data.
 - Node integration tests for API behavior and metadata persistence.
@@ -18,10 +20,10 @@ This repo currently contains the management/review prototype and a browser-based
 
 Not built yet:
 
-- Raspberry Pi recorder service.
-- Real microphone capture, GPIO buttons, status LED, and silence auto-stop.
-- Automated Pi bootstrap/deploy scripts.
-- Recorder-side durable sync retries and post-ack deletion policy.
+- Hardware smoke-tested Pi wiring and microphone capture.
+- Silence auto-stop.
+- Manager deploy script and richer health checks.
+- Recorder-side storage policy for deleting acknowledged local audio.
 
 ## Quick Start
 
@@ -29,6 +31,7 @@ Requirements:
 
 - Node.js with `node:sqlite` support. This project is currently tested locally with Node `v25.x`.
 - npm.
+- Python 3.11+ for recorder service tests and local recorder commands.
 
 Install dependencies:
 
@@ -54,6 +57,12 @@ Run tests:
 
 ```bash
 npm test
+```
+
+Run only the Python recorder tests:
+
+```bash
+npm run test:recorder
 ```
 
 Open the recorder emulator from the top navigation in the web app. The browser may prompt for microphone access.
@@ -88,7 +97,9 @@ JSON_BODY_LIMIT=64mb npm run dev
 - `npm run dev`: start the API and Vite dev server on localhost.
 - `npm run dev:lan`: start both servers bound to `0.0.0.0` for LAN testing.
 - `npm run lint`: run ESLint with the shared `tv-shared` React app config plus local Node overrides.
-- `npm run test`: run Node integration tests.
+- `npm run test`: run Node integration tests and Python recorder unit tests.
+- `npm run test:node`: run only Node integration tests.
+- `npm run test:recorder`: run only Python recorder unit tests.
 - `npm run test:watch`: run Node integration tests in watch mode.
 - `npm run build`: typecheck and build the web UI into `dist/`.
 - `npm run verify`: run lint, tests, and build.
@@ -96,6 +107,11 @@ JSON_BODY_LIMIT=64mb npm run dev
 - `npm run preview`: run the Express server in production mode.
 - `npm run seed` / `npm run reset`: regenerate fixture sessions and clips.
 - `npm run emulator:cli`: generate or replay recorder payloads through the manager ingestion endpoint.
+
+Pi deployment helpers:
+
+- `scripts/bootstrap-pi.sh`: first-boot Raspberry Pi setup for packages, service user, data directories, repo checkout, and recorder service installation. Use `--install-node-deps` when the Pi also needs manager dependencies installed.
+- `scripts/install-recorder-service.sh`: install or update the recorder systemd service from an existing checkout.
 
 ## Repo Layout
 
@@ -106,7 +122,9 @@ JSON_BODY_LIMIT=64mb npm run dev
 - `docs/ingestion.md`: manager session import contract for the emulator and recorder.
 - `server/`: Express API and metadata store.
 - `src/`: React review UI.
-- `scripts/`: fixture and future automation scripts.
+- `scripts/`: fixture, emulator, bootstrap, and service installation scripts.
+- `recorder/`: Python Raspberry Pi recorder service, adapters, spool/sync logic, CLI, and tests.
+- `systemd/`: service unit templates for Pi deployment.
 - `tests/`: Node integration tests.
 - `.github/workflows/`: thin wrappers around reusable `tv-shared` workflow logic.
 - `library/`: local generated media/metadata data, ignored by git.
