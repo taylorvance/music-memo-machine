@@ -140,28 +140,6 @@ function reviewStatus(session: Session): ReviewStatus {
   return 'resolved';
 }
 
-function defaultRange(session: Session): Range {
-  const firstBookmark =
-    session.bookmarks.find((bookmark) => bookmark.state === 'unresolved') ||
-    session.bookmarks[0];
-  if (!firstBookmark) {
-    return { start: 0, end: Math.min(20, session.duration_seconds) };
-  }
-
-  return {
-    start: clamp(
-      firstBookmark.timestamp_seconds - 8,
-      0,
-      session.duration_seconds,
-    ),
-    end: clamp(
-      firstBookmark.timestamp_seconds + 12,
-      1,
-      session.duration_seconds,
-    ),
-  };
-}
-
 function normalizedBookmarkState(state: BookmarkState) {
   return state === 'captured' ? 'resolved' : state;
 }
@@ -561,7 +539,7 @@ function ReviewSession({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [range, setRange] = useState<Range>(() => defaultRange(session));
+  const [range, setRange] = useState<Range | null>(null);
   const [precisionMode, setPrecisionMode] = useState(false);
   const [sessionTitle, setSessionTitle] = useState(session.title || '');
   const [notes, setNotes] = useState(session.notes || '');
@@ -569,17 +547,16 @@ function ReviewSession({
   const [selectedBookmarkId, setSelectedBookmarkId] = useState('');
 
   useEffect(() => {
-    const nextRange = defaultRange(session);
-    setRange(nextRange);
+    setRange(null);
     setSessionTitle(session.title || '');
     setNotes(session.notes || '');
     setClipTitle('');
     setSelectedBookmarkId('');
-    setCurrentTime(nextRange.start);
+    setCurrentTime(0);
     setIsPlaying(false);
     if (audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.currentTime = nextRange.start;
+      audioRef.current.currentTime = 0;
     }
   }, [session.id]);
 
@@ -641,6 +618,7 @@ function ReviewSession({
   }
 
   async function saveSelectedClip() {
+    if (!range) return;
     await saveClip(session.id, {
       source_start_seconds: range.start,
       source_end_seconds: range.end,
@@ -828,14 +806,18 @@ function ReviewSession({
               min={0}
               max={session.duration_seconds}
               step={precisionMode ? 0.05 : 0.1}
-              value={formatRangeInput(range.start)}
+              value={range ? formatRangeInput(range.start) : ''}
               onChange={(event) =>
                 setRange((current) => ({
-                  ...current,
+                  ...(current || {
+                    start: 0,
+                    end: Math.min(20, session.duration_seconds),
+                  }),
                   start: clamp(
-                    inputSeconds(event.target.value, current.start),
+                    inputSeconds(event.target.value, current?.start || 0),
                     0,
-                    current.end - MIN_RANGE_SECONDS,
+                    (current?.end || session.duration_seconds) -
+                      MIN_RANGE_SECONDS,
                   ),
                 }))
               }
@@ -848,13 +830,16 @@ function ReviewSession({
               min={0}
               max={session.duration_seconds}
               step={precisionMode ? 0.05 : 0.1}
-              value={formatRangeInput(range.end)}
+              value={range ? formatRangeInput(range.end) : ''}
               onChange={(event) =>
                 setRange((current) => ({
-                  ...current,
+                  ...(current || { start: 0, end: session.duration_seconds }),
                   end: clamp(
-                    inputSeconds(event.target.value, current.end),
-                    current.start + MIN_RANGE_SECONDS,
+                    inputSeconds(
+                      event.target.value,
+                      current?.end || session.duration_seconds,
+                    ),
+                    (current?.start || 0) + MIN_RANGE_SECONDS,
                     session.duration_seconds,
                   ),
                 }))
@@ -870,7 +855,7 @@ function ReviewSession({
             className="primary-button"
             type="button"
             onClick={() => onRun(saveSelectedClip)}
-            disabled={busy || range.end <= range.start}
+            disabled={!range || busy || range.end <= range.start}
           >
             <Scissors size={16} />
             Save clip
@@ -1042,12 +1027,12 @@ function Waveform({
 }: {
   session: Session;
   currentTime: number;
-  range: Range;
+  range: Range | null;
   precisionMode: boolean;
   busy: boolean;
   selectedBookmarkId: string;
   onSeek: (time: number) => void;
-  onRangeChange: (range: Range) => void;
+  onRangeChange: (range: Range | null) => void;
   onPrecisionModeChange: (enabled: boolean) => void;
   onBookmarkSelect: (bookmark: Session['bookmarks'][number]) => void;
   onBookmarkDismiss: () => void;
@@ -1103,11 +1088,13 @@ function Waveform({
     if (event.button !== 0) return;
     const rect = waveformRect();
     if (!rect || rect.width <= 0) return;
+    if (target !== 'select' && !range) return;
     const anchorTime = timeFromClientX(event.clientX);
+    const initialRange = range || { start: anchorTime, end: anchorTime };
     const initialOffset = clamp(
-      anchorTime - range.start,
+      anchorTime - initialRange.start,
       0,
-      range.end - range.start,
+      initialRange.end - initialRange.start,
     );
 
     dragState.current = {
@@ -1115,7 +1102,7 @@ function Waveform({
       pointerId: event.pointerId,
       anchorTime,
       anchorClientX: event.clientX,
-      initialRange: range,
+      initialRange,
       initialOffset,
       rectWidth: rect.width,
     };
@@ -1123,9 +1110,9 @@ function Waveform({
     onBookmarkDismiss();
     onSeek(
       target === 'start'
-        ? range.start
+        ? initialRange.start
         : target === 'end'
-          ? range.end
+          ? initialRange.end
           : anchorTime,
     );
     waveformRef.current?.setPointerCapture(event.pointerId);
@@ -1261,6 +1248,7 @@ function Waveform({
   }
 
   function nudgeRange(target: 'start' | 'end', direction: -1 | 1) {
+    if (!range) return;
     const step = precisionMode ? 0.05 : 0.5;
     const delta = direction * step;
     if (target === 'start') {
@@ -1293,9 +1281,12 @@ function Waveform({
     nudgeRange(target, event.key === 'ArrowLeft' ? -1 : 1);
   }
 
-  const selectionLeft = (range.start / session.duration_seconds) * 100;
-  const selectionWidth =
-    ((range.end - range.start) / session.duration_seconds) * 100;
+  const selectionLeft = range
+    ? (range.start / session.duration_seconds) * 100
+    : 0;
+  const selectionWidth = range
+    ? ((range.end - range.start) / session.duration_seconds) * 100
+    : 0;
 
   return (
     <div className="waveform-wrap">
@@ -1319,32 +1310,34 @@ function Waveform({
         ) : (
           <div className="waveform-empty">Waveform unavailable</div>
         )}
-        <div
-          className="selection"
-          style={{
-            left: `${selectionLeft}%`,
-            width: `${selectionWidth}%`,
-          }}
-          onPointerDown={(event) => startDrag(event, 'move')}
-          title="Move selected range"
-        >
-          <button
-            className="selection-handle start"
-            type="button"
-            aria-label="Adjust clip start"
-            title="Adjust clip start"
-            onPointerDown={(event) => startDrag(event, 'start')}
-            onKeyDown={(event) => handleKeyDown(event, 'start')}
-          />
-          <button
-            className="selection-handle end"
-            type="button"
-            aria-label="Adjust clip end"
-            title="Adjust clip end"
-            onPointerDown={(event) => startDrag(event, 'end')}
-            onKeyDown={(event) => handleKeyDown(event, 'end')}
-          />
-        </div>
+        {range ? (
+          <div
+            className="selection"
+            style={{
+              left: `${selectionLeft}%`,
+              width: `${selectionWidth}%`,
+            }}
+            onPointerDown={(event) => startDrag(event, 'move')}
+            title="Move selected range"
+          >
+            <button
+              className="selection-handle start"
+              type="button"
+              aria-label="Adjust clip start"
+              title="Adjust clip start"
+              onPointerDown={(event) => startDrag(event, 'start')}
+              onKeyDown={(event) => handleKeyDown(event, 'start')}
+            />
+            <button
+              className="selection-handle end"
+              type="button"
+              aria-label="Adjust clip end"
+              title="Adjust clip end"
+              onPointerDown={(event) => startDrag(event, 'end')}
+              onKeyDown={(event) => handleKeyDown(event, 'end')}
+            />
+          </div>
+        ) : null}
         <div
           className="playhead"
           style={{ left: `${(currentTime / session.duration_seconds) * 100}%` }}
@@ -1478,7 +1471,9 @@ function Waveform({
       </div>
       <div className="waveform-scale">
         <span>
-          {formatDuration(range.start)}-{formatDuration(range.end)}
+          {range
+            ? `${formatDuration(range.start)}-${formatDuration(range.end)}`
+            : 'No range selected'}
         </span>
         <button
           className={cx('fine-button', precisionMode && 'active')}
