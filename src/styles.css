@@ -398,6 +398,11 @@ h3 {
   background: var(--panel);
 }
 
+.waveform:focus-visible {
+  outline: 3px solid rgba(22, 119, 111, 0.28);
+  outline-offset: 3px;
+}
+
 .bars {
   position: absolute;
   inset: 18px 10px;

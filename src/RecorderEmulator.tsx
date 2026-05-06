@@ -7,6 +7,7 @@ import {
   Square,
   Upload,
 } from 'lucide-react';
+import { useShortcutRegistry } from '@taylorvance/tv-shared-web/shortcuts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ingestSessionMultipart } from './api';
 
@@ -147,6 +148,29 @@ function statusLabel(status: EmulatorStatus) {
     default:
       return 'Idle';
   }
+}
+
+function isEmulatorTextTarget(event: KeyboardEvent) {
+  const target = event.target;
+  return (
+    target instanceof HTMLElement &&
+    Boolean(
+      target.closest(
+        'audio, input, select, textarea, [contenteditable="true"], [role="textbox"]',
+      ),
+    )
+  );
+}
+
+function isEmulatorFocusTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(
+      target.closest(
+        'audio, input, select, textarea, [contenteditable="true"], [role="textbox"]',
+      ),
+    )
+  );
 }
 
 export function RecorderEmulator({
@@ -365,9 +389,49 @@ export function RecorderEmulator({
 
   const recordingActive = status === 'recording' || status === 'arming';
   const canSync = status === 'ready' || status === 'failed';
+  const { ref: emulatorShortcutRef } = useShortcutRegistry<HTMLElement>(
+    [
+      {
+        id: 'toggle-recording',
+        keys: 'r',
+        label: 'Toggle recording',
+        onTrigger: () => {
+          if (status === 'recording') {
+            stopRecording();
+            return;
+          }
+          if (!recordingActive && status !== 'syncing') {
+            void startRecording();
+          }
+        },
+      },
+      {
+        id: 'add-bookmark',
+        keys: 'b',
+        label: 'Bookmark',
+        onTrigger: addBookmark,
+      },
+    ],
+    {
+      hotkeys: {
+        ignoreEventWhen: isEmulatorTextTarget,
+        preventDefault: true,
+      },
+    },
+  );
 
   return (
-    <section className="emulator-shell" aria-label="Recorder emulator">
+    <section
+      ref={emulatorShortcutRef}
+      className="emulator-shell"
+      aria-label="Recorder emulator"
+      tabIndex={-1}
+      onPointerDown={(event) => {
+        if (!isEmulatorFocusTarget(event.target)) {
+          event.currentTarget.focus({ preventScroll: true });
+        }
+      }}
+    >
       <div className="emulator-board">
         <div className="emulator-status-strip">
           <div

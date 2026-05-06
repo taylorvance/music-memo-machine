@@ -21,6 +21,7 @@ import {
   createStringCodec,
   createStringUnionCodec,
 } from '@taylorvance/tv-shared-web/codecs';
+import { useShortcutRegistry } from '@taylorvance/tv-shared-web/shortcuts';
 import { useUrlState } from '@taylorvance/tv-shared-web/url-state';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -142,6 +143,21 @@ function reviewStatus(session: Session): ReviewStatus {
 
 function normalizedBookmarkState(state: BookmarkState) {
   return state === 'captured' ? 'resolved' : state;
+}
+
+function isElementControlTarget(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(
+      target.closest(
+        'a, audio, button, input, select, textarea, [contenteditable="true"], [role="button"], [role="radio"]',
+      ),
+    )
+  );
+}
+
+function isHotkeyControlTarget(event: KeyboardEvent) {
+  return isElementControlTarget(event.target);
 }
 
 export default function App() {
@@ -654,6 +670,47 @@ function ReviewSession({
     });
   }
 
+  const { ref: reviewShortcutRef } = useShortcutRegistry<HTMLDivElement>(
+    [
+      {
+        id: 'toggle-playback',
+        keys: 'space',
+        label: 'Play/pause',
+        onTrigger: () => void onRun(togglePlayback),
+      },
+      {
+        id: 'seek-back',
+        keys: 'left',
+        label: 'Back 5 seconds',
+        onTrigger: () => jumpSeconds(-5),
+      },
+      {
+        id: 'seek-forward',
+        keys: 'right',
+        label: 'Forward 5 seconds',
+        onTrigger: () => jumpSeconds(5),
+      },
+      {
+        id: 'previous-bookmark',
+        keys: 'shift+left',
+        label: 'Previous bookmark',
+        onTrigger: () => jumpBookmark('previous'),
+      },
+      {
+        id: 'next-bookmark',
+        keys: 'shift+right',
+        label: 'Next bookmark',
+        onTrigger: () => jumpBookmark('next'),
+      },
+    ],
+    {
+      hotkeys: {
+        ignoreEventWhen: isHotkeyControlTarget,
+        preventDefault: true,
+      },
+    },
+  );
+
   function patchForStatus(
     status: ReviewStatus,
   ): Parameters<typeof updateSession>[1] {
@@ -680,7 +737,16 @@ function ReviewSession({
   }
 
   return (
-    <div className="review-session">
+    <div
+      ref={reviewShortcutRef}
+      className="review-session"
+      tabIndex={-1}
+      onPointerDown={(event) => {
+        if (!isElementControlTarget(event.target)) {
+          event.currentTarget.focus({ preventScroll: true });
+        }
+      }}
+    >
       <audio
         ref={audioRef}
         src={session.audio_url}
@@ -778,7 +844,7 @@ function ReviewSession({
       </section>
 
       <section className="clip-workbench">
-        <Waveform
+        <SessionTimeline
           session={session}
           currentTime={currentTime}
           range={range}
@@ -1011,7 +1077,7 @@ function SavedClipEditor({
   );
 }
 
-function Waveform({
+function SessionTimeline({
   session,
   currentTime,
   range,
@@ -1107,6 +1173,9 @@ function Waveform({
       rectWidth: rect.width,
     };
 
+    if (target === 'select' || target === 'move') {
+      waveformRef.current?.focus({ preventScroll: true });
+    }
     onBookmarkDismiss();
     onSeek(
       target === 'start'
@@ -1293,6 +1362,9 @@ function Waveform({
       <div
         ref={waveformRef}
         className="waveform"
+        role="group"
+        tabIndex={0}
+        aria-label="Session timeline"
         onPointerDown={pointerDown}
         onPointerMove={pointerMove}
         onPointerUp={endDrag}

@@ -15,8 +15,8 @@ This file is the working memory for implementation priorities. Update it when pr
 The management/review prototype exists:
 
 - Fixture-backed sessions and clips.
-- Review UI with waveform, bookmarks, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
-- Browser recorder emulator with microphone capture, record/stop/bookmark controls, a virtual status light, WAV encoding, and manager sync.
+- Review UI with session timeline, waveform, bookmarks, keyboard transport, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
+- Browser recorder emulator with microphone capture, record/stop/bookmark controls, scoped record/bookmark hotkeys, a virtual status light, WAV encoding, and manager sync.
 - Express API with SQLite metadata plus sidecar JSON files.
 - Manager ingestion endpoint for complete recorder/emulator WAV session imports with multipart upload, idempotent acknowledgement, and manager-generated waveform caches.
 - CLI recorder test harness that can generate WAV sessions, add bookmarks, save/replay payloads, and submit duplicate retries.
@@ -73,3 +73,4 @@ The recorder side now has a testable first implementation. Hardware smoke testin
 - Node version target for Pi deployment.
 - How much metadata the recorder owns before manager acknowledgement.
 - Whether the browser emulator should add silence auto-stop before hardware work.
+- Whether the browser emulator sync flow should remain explicit or switch to automatic sync after recording stops.
