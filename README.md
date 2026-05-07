@@ -6,7 +6,7 @@ This repo currently contains the management/review prototype, a browser-based re
 
 ## Current Status
 
-- React/Vite review UI for sessions, bookmarks, clips, trash, storage pressure simulation, and timeline transport hotkeys.
+- React/Vite review UI for sessions, bookmarks, clips, trash, storage pressure simulation, timeline transport hotkeys, collapsible library browsing, and simple session/clip sorting.
 - Browser recorder emulator with microphone capture, icon-only record/stop/bookmark controls, scoped record/bookmark hotkeys, virtual red/blue status LEDs, WAV encoding, and automatic manager sync.
 - Express API for session metadata, clip creation, trash/restore, and storage actions.
 - Manager-side multipart ingestion endpoint for recorder/emulator WAV imports, with JSON/base64 compatibility for small saved payloads.

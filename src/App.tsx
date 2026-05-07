@@ -5,6 +5,7 @@ import {
   Check,
   Crosshair,
   FastForward,
+  Menu,
   Pause,
   Play,
   Radio,
@@ -54,6 +55,8 @@ type RangeDragTarget = 'select' | 'start' | 'end' | 'move';
 type AppMode = 'review' | 'emulator';
 type BrowseMode = 'sessions' | 'clips';
 type ReviewStatus = 'needs_review' | 'resolved' | 'dismissed';
+type SessionSort = 'review_priority' | 'date_desc' | 'date_asc';
+type ClipSort = 'date_desc' | 'date_asc';
 
 type RangeDragState = {
   target: RangeDragTarget;
@@ -70,6 +73,12 @@ const SELECT_DRAG_THRESHOLD_SECONDS = 0.2;
 const PRECISION_DRAG_SCALE = 0.25;
 const appModeCodec = createStringUnionCodec(['review', 'emulator']);
 const browseModeCodec = createStringUnionCodec(['sessions', 'clips']);
+const sessionSortCodec = createStringUnionCodec([
+  'review_priority',
+  'date_desc',
+  'date_asc',
+]);
+const clipSortCodec = createStringUnionCodec(['date_desc', 'date_asc']);
 const stringCodec = createStringCodec();
 
 function clamp(value: number, min: number, max: number) {
@@ -134,6 +143,13 @@ function sessionPriority(session: Session) {
   return 3;
 }
 
+function compareCreatedAt(
+  a: { created_at: string },
+  b: { created_at: string },
+) {
+  return Date.parse(b.created_at) - Date.parse(a.created_at);
+}
+
 function reviewStatus(session: Session): ReviewStatus {
   if (session.state === 'dismissed') return 'dismissed';
   if (session.state === 'unreviewed' || session.state === 'bookmarked')
@@ -160,6 +176,13 @@ function isHotkeyControlTarget(event: KeyboardEvent) {
   return isElementControlTarget(event.target);
 }
 
+function isMobileViewport() {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(max-width: 820px)').matches
+  );
+}
+
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [clips, setClips] = useState<Clip[]>([]);
@@ -181,22 +204,41 @@ export default function App() {
     codec: stringCodec,
     defaultValue: '',
   });
+  const [sessionSort, setSessionSort] = useUrlState<SessionSort>(
+    'sessionSort',
+    {
+      codec: sessionSortCodec,
+      defaultValue: 'review_priority',
+    },
+  );
+  const [clipSort, setClipSort] = useUrlState<ClipSort>('clipSort', {
+    codec: clipSortCodec,
+    defaultValue: 'date_desc',
+  });
+  const [isMobileLayout, setIsMobileLayout] = useState(isMobileViewport);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(() => !isMobileViewport());
+  const [showDismissedSessions, setShowDismissedSessions] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const sortedSessions = useMemo(() => {
-    return [...sessions].sort((a, b) => {
-      const priority = sessionPriority(a) - sessionPriority(b);
-      if (priority !== 0) return priority;
-      return Date.parse(b.created_at) - Date.parse(a.created_at);
-    });
-  }, [sessions]);
+    return sessions
+      .filter(
+        (session) => showDismissedSessions || session.state !== 'dismissed',
+      )
+      .sort((a, b) => {
+        if (sessionSort === 'date_desc') return compareCreatedAt(a, b);
+        if (sessionSort === 'date_asc') return compareCreatedAt(b, a);
+        const priority = sessionPriority(a) - sessionPriority(b);
+        return priority || compareCreatedAt(a, b);
+      });
+  }, [sessionSort, sessions, showDismissedSessions]);
 
   const sortedClips = useMemo(() => {
-    return [...clips].sort(
-      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    return [...clips].sort((a, b) =>
+      clipSort === 'date_asc' ? compareCreatedAt(b, a) : compareCreatedAt(a, b),
     );
-  }, [clips]);
+  }, [clipSort, clips]);
 
   const selectedSession =
     sortedSessions.find((session) => session.id === selectedId) ||
@@ -232,6 +274,19 @@ export default function App() {
     reload().catch((caught: Error) => setError(caught.message));
   }, [reload]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 820px)');
+    const updateLayout = () => {
+      setIsMobileLayout(mediaQuery.matches);
+      if (mediaQuery.matches) {
+        setIsLibraryOpen(false);
+      }
+    };
+    updateLayout();
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
+  }, []);
+
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError('');
@@ -257,12 +312,18 @@ export default function App() {
   function selectSession(sessionId: string) {
     setSelectedId(sessionId);
     setFocusedClipId('');
+    if (isMobileLayout) {
+      setIsLibraryOpen(false);
+    }
   }
 
   function selectClip(clip: Clip) {
     setFocusedClipId(clip.id);
     if (activeSessionIds.has(clip.source_session_id)) {
       setSelectedId(clip.source_session_id);
+    }
+    if (isMobileLayout) {
+      setIsLibraryOpen(false);
     }
   }
 
@@ -324,31 +385,89 @@ export default function App() {
           }}
         />
       ) : (
-        <section className="layout">
-          <aside className="queue" aria-label="Library browser">
-            <div
-              className="browse-tabs"
-              role="tablist"
-              aria-label="Library browser"
+        <section className={cx('layout', !isLibraryOpen && 'library-closed')}>
+          <div className="library-toggle-bar">
+            <button
+              className="secondary-button library-toggle"
+              type="button"
+              onClick={() => setIsLibraryOpen((current) => !current)}
+              aria-expanded={isLibraryOpen}
+              aria-controls="library-browser"
             >
-              <button
-                className={cx(browseMode === 'sessions' && 'active')}
-                type="button"
-                onClick={() => setBrowseMode('sessions')}
-                role="tab"
-                aria-selected={browseMode === 'sessions'}
+              {isLibraryOpen ? <X size={17} /> : <Menu size={17} />}
+              Library
+            </button>
+          </div>
+          <aside
+            className="queue"
+            id="library-browser"
+            aria-label="Library browser"
+          >
+            <div className="library-header">
+              <h2>Library</h2>
+            </div>
+            <div className="library-controls">
+              <div
+                className="browse-tabs"
+                role="tablist"
+                aria-label="Library browser"
               >
-                Sessions <span>{sortedSessions.length}</span>
-              </button>
-              <button
-                className={cx(browseMode === 'clips' && 'active')}
-                type="button"
-                onClick={() => setBrowseMode('clips')}
-                role="tab"
-                aria-selected={browseMode === 'clips'}
-              >
-                Clips <span>{sortedClips.length}</span>
-              </button>
+                <button
+                  className={cx(browseMode === 'sessions' && 'active')}
+                  type="button"
+                  onClick={() => setBrowseMode('sessions')}
+                  role="tab"
+                  aria-selected={browseMode === 'sessions'}
+                >
+                  Sessions <span>{sortedSessions.length}</span>
+                </button>
+                <button
+                  className={cx(browseMode === 'clips' && 'active')}
+                  type="button"
+                  onClick={() => setBrowseMode('clips')}
+                  role="tab"
+                  aria-selected={browseMode === 'clips'}
+                >
+                  Clips <span>{sortedClips.length}</span>
+                </button>
+              </div>
+              <label className="sort-control">
+                <span>Sort</span>
+                {browseMode === 'sessions' ? (
+                  <>
+                    <select
+                      value={sessionSort}
+                      onChange={(event) =>
+                        setSessionSort(event.currentTarget.value as SessionSort)
+                      }
+                    >
+                      <option value="review_priority">Review priority</option>
+                      <option value="date_desc">Date, newest first</option>
+                      <option value="date_asc">Date, oldest first</option>
+                    </select>
+                    <label className="filter-check">
+                      <input
+                        type="checkbox"
+                        checked={showDismissedSessions}
+                        onChange={(event) =>
+                          setShowDismissedSessions(event.currentTarget.checked)
+                        }
+                      />
+                      <span>Show dismissed</span>
+                    </label>
+                  </>
+                ) : (
+                  <select
+                    value={clipSort}
+                    onChange={(event) =>
+                      setClipSort(event.currentTarget.value as ClipSort)
+                    }
+                  >
+                    <option value="date_desc">Date saved, newest first</option>
+                    <option value="date_asc">Date saved, oldest first</option>
+                  </select>
+                )}
+              </label>
             </div>
             {browseMode === 'sessions' ? (
               <div
@@ -362,6 +481,7 @@ export default function App() {
                     className={cx(
                       'session-row',
                       session.id === selectedSession?.id && 'selected',
+                      session.state === 'dismissed' && 'muted',
                     )}
                     type="button"
                     onClick={() => selectSession(session.id)}

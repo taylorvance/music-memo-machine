@@ -15,7 +15,7 @@ This file is the working memory for implementation priorities. Update it when pr
 The management/review prototype exists:
 
 - Fixture-backed sessions and clips.
-- Review UI with session timeline, waveform, bookmarks, keyboard transport, range selection, clip saving, metadata edits, trash/restore, and storage simulation.
+- Review UI with session timeline, waveform, bookmarks, keyboard transport, range selection, clip saving, metadata edits, collapsible library browsing, simple sorting, trash/restore, and storage simulation.
 - Browser recorder emulator with microphone capture, record/stop/bookmark controls, scoped record/bookmark hotkeys, virtual red/blue status LEDs, WAV encoding, and automatic manager sync.
 - Express API with SQLite metadata plus sidecar JSON files.
 - Manager ingestion endpoint for complete recorder/emulator WAV session imports with multipart upload, idempotent acknowledgement, and manager-generated waveform caches.
